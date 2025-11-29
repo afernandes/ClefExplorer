@@ -1,0 +1,59 @@
+@using ClefExplorer.Components
+
+<li>
+    <div class="d-flex align-items-center py-1 px-2 hover-bg-light rounded">
+        @if (Node.Children.Any())
+        {
+            <i class="bi @(Node.IsExpanded ? "bi-chevron-down" : "bi-chevron-right") me-1 text-muted small cursor-pointer" 
+               @onclick="() => OnToggleExpand.InvokeAsync(Node)" 
+               style="width: 16px;"></i>
+        }
+        else
+        {
+            <span style="width: 16px;" class="me-1"></span>
+        }
+
+        <div class="form-check mb-0 d-flex align-items-center">
+            <input class="form-check-input me-2" type="checkbox" 
+                   checked="@(Node.IsChecked == true)" 
+                   indeterminate="@(Node.IsChecked == null)"
+                   @onchange="() => OnToggleCheck.InvokeAsync(Node)" />
+            
+            <span class="text-truncate small user-select-none cursor-pointer @(IsBackupFolder ? "fw-bold text-danger" : "")" 
+                  @onclick="() => OnToggleExpand.InvokeAsync(Node)"
+                  title="@Node.Name">
+                @if (!string.IsNullOrEmpty(Node.FullPath))
+                {
+                    <i class="bi bi-file-text me-1 text-primary"></i>
+                }
+                else if (IsBackupFolder)
+                {
+                    <i class="bi bi-archive me-1 text-danger"></i>
+                }
+                else
+                {
+                    <i class="bi bi-folder me-1 text-warning"></i>
+                }
+                @Node.Name
+            </span>
+        </div>
+    </div>
+
+    @if (Node.IsExpanded && Node.Children.Any())
+    {
+        <ul class="list-unstyled ps-3 mb-0 border-start ms-2">
+            @foreach (var child in Node.Children)
+            {
+                <FileTreeNodeItem Node="@child" OnToggleExpand="OnToggleExpand" OnToggleCheck="OnToggleCheck" />
+            }
+        </ul>
+    }
+</li>
+
+@code {
+    [Parameter] public LogFileTree.FileTreeNode Node { get; set; } = new();
+    [Parameter] public EventCallback<LogFileTree.FileTreeNode> OnToggleExpand { get; set; }
+    [Parameter] public EventCallback<LogFileTree.FileTreeNode> OnToggleCheck { get; set; }
+
+    private bool IsBackupFolder => string.Equals(Node.Name, "Backup", StringComparison.OrdinalIgnoreCase);
+}

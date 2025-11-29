@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ClefExplorer</title>
+    <link rel="icon" href="app-icon.svg" />
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        body { font-family: Segoe UI, sans-serif; margin: 0; }
+        .toolbar { display:flex; gap:12px; align-items:center; padding:8px 12px; border-bottom:1px solid #ddd; }
+        .filter { flex: 0 0 360px; padding:6px 8px; }
+        .file { color:#555; }
+        table.log { width:100%; border-collapse: collapse; }
+        table.log th, table.log td { text-align:left; border-bottom:1px solid #eee; padding:6px 8px; }
+        tr.row:hover { background:#f6f6f6; cursor:pointer; }
+        details { margin: 8px 12px; }
+        pre { white-space: pre-wrap; padding:12px; background:#fafafa; border:1px solid #eee; }
+    </style>
+</head>
+<body>
+    <div id="app">Carregando...</div>
+    <script src="_framework/blazor.webview.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+    <script>
+        window.clipboardCopy = {
+            copyText: function(text) {
+                navigator.clipboard.writeText(text).then(function () {
+                    // alert("Copied to clipboard!");
+                })
+                .catch(function (error) {
+                    alert(error);
+                });
+            }
+        };
+    </script>
+</body>
+</html>

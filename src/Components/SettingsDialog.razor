@@ -1,0 +1,156 @@
+@using ClefExplorer.Services
+@inject SettingsService SettingsService
+@inject FileAssociationService FileAssociationService
+
+@if (IsVisible)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Configurações</h5>
+                    <button type="button" class="btn-close" @onclick="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-4">
+                        <h6>Ignorar Arquivos (Padrões)</h6>
+                        <p class="text-muted small">Ex: NomeArquivo.*.clef</p>
+                        <div class="input-group mb-2">
+                            <input type="text" class="form-control" @bind="NewFilePattern" placeholder="Novo padrão..." @onkeyup="@(e => { if (e.Key == "Enter") AddFilePattern(); })" />
+                            <button class="btn btn-outline-primary" @onclick="AddFilePattern">Adicionar</button>
+                        </div>
+                        <ul class="list-group">
+                            @foreach (var pattern in SettingsService.Settings.IgnoredFilePatterns)
+                            {
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    @pattern
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveFilePattern(pattern)"><i class="bi bi-trash"></i></button>
+                                </li>
+                            }
+                        </ul>
+                    </div>
+
+                    <div class="mb-4">
+                        <h6>Ignorar Linhas de Log (Contém Texto)</h6>
+                        <p class="text-muted small">Ex: HealthCheck</p>
+                        <div class="input-group mb-2">
+                            <input type="text" class="form-control" @bind="NewLogLine" placeholder="Texto a ignorar..." @onkeyup="@(e => { if (e.Key == "Enter") AddLogLine(); })" />
+                            <button class="btn btn-outline-primary" @onclick="AddLogLine">Adicionar</button>
+                        </div>
+                        <ul class="list-group">
+                            @foreach (var line in SettingsService.Settings.IgnoredLogLines)
+                            {
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    @line
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveLogLine(line)"><i class="bi bi-trash"></i></button>
+                                </li>
+                            }
+                        </ul>
+                    </div>
+
+                    <div class="mb-4">
+                        <h6>Associação de Arquivos</h6>
+                        <p class="text-muted small">Definir este aplicativo como padrão para arquivos .clef e .clef.gz</p>
+                        @if (_isDefaultApp)
+                        {
+                            <div class="alert alert-success d-flex align-items-center py-2">
+                                <i class="bi bi-check-circle-fill me-2"></i>
+                                <div>Este aplicativo já é o padrão.</div>
+                            </div>
+                        }
+                        else
+                        {
+                            <button class="btn btn-outline-primary" @onclick="SetAsDefaultApp">Definir como padrão</button>
+                        }
+                    </div>
+
+                    <div class="text-center text-muted small mt-4">
+                        Versão @System.Reflection.Assembly.GetExecutingAssembly().GetName().Version
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="Close">Fechar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public EventCallback<bool> IsVisibleChanged { get; set; }
+
+    private string NewFilePattern { get; set; } = "";
+    private string NewLogLine { get; set; } = "";
+    private bool _isDefaultApp;
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible)
+        {
+            CheckDefaultApp();
+        }
+    }
+
+    private void CheckDefaultApp()
+    {
+        try
+        {
+            _isDefaultApp = FileAssociationService.IsDefaultHandler();
+        }
+        catch
+        {
+            _isDefaultApp = false;
+        }
+    }
+
+    private void AddFilePattern()
+    {
+        if (!string.IsNullOrWhiteSpace(NewFilePattern))
+        {
+            if (!SettingsService.Settings.IgnoredFilePatterns.Contains(NewFilePattern))
+            {
+                SettingsService.Settings.IgnoredFilePatterns.Add(NewFilePattern);
+                SettingsService.Save();
+            }
+            NewFilePattern = "";
+        }
+    }
+
+    private void RemoveFilePattern(string pattern)
+    {
+        SettingsService.Settings.IgnoredFilePatterns.Remove(pattern);
+        SettingsService.Save();
+    }
+
+    private void AddLogLine()
+    {
+        if (!string.IsNullOrWhiteSpace(NewLogLine))
+        {
+            if (!SettingsService.Settings.IgnoredLogLines.Contains(NewLogLine))
+            {
+                SettingsService.Settings.IgnoredLogLines.Add(NewLogLine);
+                SettingsService.Save();
+            }
+            NewLogLine = "";
+        }
+    }
+
+    private void RemoveLogLine(string line)
+    {
+        SettingsService.Settings.IgnoredLogLines.Remove(line);
+        SettingsService.Save();
+    }
+
+    private void SetAsDefaultApp()
+    {
+        FileAssociationService.SetAsDefault();
+        CheckDefaultApp();
+    }
+
+    private async Task Close()
+    {
+        IsVisible = false;
+        await IsVisibleChanged.InvokeAsync(false);
+    }
+}

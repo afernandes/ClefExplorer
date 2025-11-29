@@ -1,0 +1,368 @@
+@using System.IO
+@using System.Text.RegularExpressions
+
+<div class="file-tree custom-scrollbar">
+    @if (RootNodes.Any())
+    {
+        <ul class="list-unstyled ps-0 mb-0">
+            @foreach (var node in RootNodes)
+            {
+                <FileTreeNodeItem Node="@node" OnToggleExpand="ToggleExpand" OnToggleCheck="ToggleCheck" />
+            }
+        </ul>
+    }
+    else
+    {
+        <div class="text-muted small p-3 text-center">Nenhum arquivo carregado</div>
+    }
+</div>
+
+@code {
+    [Parameter] public IEnumerable<string> Files { get; set; } = Enumerable.Empty<string>();
+    [Parameter] public IEnumerable<string> CheckedFiles { get; set; } = Enumerable.Empty<string>();
+    [Parameter] public EventCallback<HashSet<string>> OnSelectionChanged { get; set; }
+
+    private List<FileTreeNode> RootNodes { get; set; } = new();
+    private HashSet<string> _selectedFiles = new();
+    private List<string>? _lastFiles;
+    private HashSet<string>? _lastCheckedFiles;
+
+    protected override void OnParametersSet()
+    {
+        var currentFiles = Files?.OrderBy(f => f).ToList() ?? new List<string>();
+        var currentChecked = CheckedFiles != null ? new HashSet<string>(CheckedFiles, StringComparer.OrdinalIgnoreCase) : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        
+        bool filesChanged = _lastFiles == null || !currentFiles.SequenceEqual(_lastFiles);
+        // We only care about external checked changes if files didn't change, 
+        // but usually if files change we rebuild anyway.
+        // Also, if the user clicks a checkbox, OnSelectionChanged fires, parent updates CheckedFiles, 
+        // and we come back here. We should avoid loop.
+        // But here we are just syncing state.
+        
+        if (filesChanged)
+        {
+            _lastFiles = currentFiles;
+            _lastCheckedFiles = currentChecked;
+            BuildTree();
+        }
+        else if (_lastCheckedFiles == null || !currentChecked.SetEquals(_lastCheckedFiles))
+        {
+             _lastCheckedFiles = currentChecked;
+             ApplyCheckStates(RootNodes, currentChecked);
+             UpdateAllAncestors(RootNodes);
+             
+             // Sync internal selected files
+             _selectedFiles.Clear();
+             foreach(var f in currentChecked) _selectedFiles.Add(f);
+        }
+    }
+
+    private void BuildTree()
+    {
+        RootNodes.Clear();
+        _selectedFiles.Clear();
+
+        if (_lastFiles == null || !_lastFiles.Any()) return;
+
+        var commonSegments = GetCommonPathSegments(_lastFiles);
+
+        foreach (var file in _lastFiles)
+        {
+            var pathParts = GetVirtualPathParts(file, commonSegments);
+            AddNodeToTree(RootNodes, pathParts, file);
+        }
+        
+        SortNodes(RootNodes);
+        CollapseSingleChildNodes(RootNodes);
+        
+        if (_lastCheckedFiles != null)
+        {
+            ApplyCheckStates(RootNodes, _lastCheckedFiles);
+            UpdateAllAncestors(RootNodes);
+            foreach(var f in _lastCheckedFiles) _selectedFiles.Add(f);
+        }
+        
+        UpdateExpansionState(RootNodes);
+    }
+
+    private void UpdateExpansionState(List<FileTreeNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            // Expand if checked or indeterminate. Collapse if unchecked.
+            node.IsExpanded = node.IsChecked != false;
+            UpdateExpansionState(node.Children);
+        }
+    }
+
+    private string[] GetCommonPathSegments(List<string> files)
+    {
+        if (files.Count == 0) return Array.Empty<string>();
+
+        var commonSegments = GetDirSegments(files[0]);
+        
+        foreach (var file in files.Skip(1))
+        {
+            var segments = GetDirSegments(file);
+            int matchLength = 0;
+            int minLen = Math.Min(commonSegments.Length, segments.Length);
+            
+            for (int i = 0; i < minLen; i++)
+            {
+                if (string.Equals(commonSegments[i], segments[i], StringComparison.OrdinalIgnoreCase))
+                    matchLength++;
+                else
+                    break;
+            }
+            
+            if (matchLength < commonSegments.Length)
+                commonSegments = commonSegments.Take(matchLength).ToArray();
+            
+            if (commonSegments.Length == 0) break;
+        }
+        
+        return commonSegments;
+    }
+
+    private string[] GetDirSegments(string path)
+    {
+        var dir = Path.GetDirectoryName(path);
+        if (string.IsNullOrEmpty(dir)) return Array.Empty<string>();
+        return dir.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    private List<string> GetVirtualPathParts(string file, string[] commonSegments)
+    {
+        var isGz = file.EndsWith(".gz", StringComparison.OrdinalIgnoreCase);
+        var fileName = Path.GetFileName(file);
+        
+        var fileSegments = GetDirSegments(file);
+        var skipCount = Math.Max(0, commonSegments.Length - 1);
+        var pathParts = fileSegments.Skip(skipCount).ToList();
+
+        string cleanName;
+
+        if (isGz)
+        {
+            var match = Regex.Match(fileName, @"(?:^|\.)log(\d{4})(\d{2})(\d{2})\.clef\.gz$", RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                pathParts.Add(match.Groups[1].Value); // Year
+                pathParts.Add(match.Groups[2].Value); // Month
+                pathParts.Add(match.Groups[3].Value); // Day
+                
+                cleanName = Regex.Replace(fileName, @"(?:^|\.)log\d+\.clef\.gz$", "", RegexOptions.IgnoreCase);
+                if (string.IsNullOrWhiteSpace(cleanName)) cleanName = "log";
+            }
+            else
+            {
+                cleanName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(fileName));
+            }
+        }
+        else
+        {
+            cleanName = Regex.Replace(fileName, @"\.log\d+\.clef$", "", RegexOptions.IgnoreCase);
+            if (cleanName.EndsWith(".clef", StringComparison.OrdinalIgnoreCase))
+            {
+                cleanName = Path.GetFileNameWithoutExtension(cleanName);
+            }
+        }
+
+        var nameParts = cleanName.Split('.');
+        if (nameParts.Length > 1)
+        {
+            pathParts.AddRange(nameParts.Take(nameParts.Length - 1));
+            fileName = nameParts.Last();
+        }
+        else
+        {
+            fileName = cleanName;
+        }
+        
+        pathParts.Add(fileName);
+        return pathParts;
+    }
+
+    private void AddNodeToTree(List<FileTreeNode> currentLevel, List<string> pathParts, string fullPath)
+    {
+        FileTreeNode? parent = null;
+
+        for (int i = 0; i < pathParts.Count; i++)
+        {
+            var part = pathParts[i];
+            var isLast = i == pathParts.Count - 1;
+            
+            var currentNode = currentLevel.FirstOrDefault(n => n.Name.Equals(part, StringComparison.OrdinalIgnoreCase));
+            if (currentNode == null)
+            {
+                currentNode = new FileTreeNode
+                {
+                    Name = part,
+                    Parent = parent
+                };
+                currentLevel.Add(currentNode);
+            }
+
+            if (isLast)
+            {
+                currentNode.FullPath = fullPath;
+            }
+
+            parent = currentNode;
+            currentLevel = currentNode.Children;
+        }
+    }
+
+    private void CollapseSingleChildNodes(List<FileTreeNode> nodes)
+    {
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            var node = nodes[i];
+            while (string.IsNullOrEmpty(node.FullPath) && 
+                   node.Children.Count == 1 && 
+                   string.IsNullOrEmpty(node.Children[0].FullPath))
+            {
+                node = node.Children[0];
+            }
+            nodes[i] = node;
+            nodes[i].Parent = null;
+        }
+    }
+
+    private void SortNodes(List<FileTreeNode> nodes)
+    {
+        // Sort folders first, then files
+        nodes.Sort((a, b) => 
+        {
+            var aIsFolder = a.Children.Any();
+            var bIsFolder = b.Children.Any();
+            
+            if (aIsFolder && !bIsFolder) return -1;
+            if (!aIsFolder && bIsFolder) return 1;
+            
+            return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+        });
+        
+        foreach (var node in nodes)
+        {
+            SortNodes(node.Children);
+        }
+    }
+
+    private void ApplyCheckStates(List<FileTreeNode> nodes, HashSet<string> checkedFiles)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.FullPath != null)
+            {
+                node.IsChecked = checkedFiles.Contains(node.FullPath);
+            }
+            ApplyCheckStates(node.Children, checkedFiles);
+        }
+    }
+    
+    private void UpdateAllAncestors(List<FileTreeNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            UpdateAllAncestors(node.Children);
+            // We need to update ancestors from bottom up, but this recursion goes top down then bottom up?
+            // Actually UpdateAncestors(node) updates parents.
+            // So we just need to ensure leaves are correct, then update parents.
+            // But ApplyCheckStates sets leaves (and intermediate nodes if they have FullPath, which they shouldn't usually).
+            // Intermediate nodes check state depends on children.
+        }
+        
+        // A better way: Post-order traversal to set directory check states
+        foreach (var node in nodes)
+        {
+            UpdateDirectoryCheckState(node);
+        }
+    }
+
+    private void UpdateDirectoryCheckState(FileTreeNode node)
+    {
+        foreach (var child in node.Children)
+        {
+            UpdateDirectoryCheckState(child);
+        }
+        
+        if (node.Children.Any())
+        {
+            var allChecked = node.Children.All(c => c.IsChecked == true);
+            var allUnchecked = node.Children.All(c => c.IsChecked == false);
+
+            if (allChecked) node.IsChecked = true;
+            else if (allUnchecked) node.IsChecked = false;
+            else node.IsChecked = null;
+        }
+    }
+
+    private async Task ToggleCheck(FileTreeNode node)
+    {
+        var newState = node.IsChecked != true; // Toggle
+        SetCheckState(node, newState);
+        UpdateAncestors(node);
+        
+        // Re-calculate selected files
+        _selectedFiles.Clear();
+        CollectSelectedFiles(RootNodes);
+        
+        // Update internal state to avoid loop issues
+        _lastCheckedFiles = new HashSet<string>(_selectedFiles);
+        
+        await OnSelectionChanged.InvokeAsync(new HashSet<string>(_selectedFiles));
+    }
+
+    private void SetCheckState(FileTreeNode node, bool state)
+    {
+        node.IsChecked = state;
+        foreach (var child in node.Children)
+        {
+            SetCheckState(child, state);
+        }
+    }
+
+    private void UpdateAncestors(FileTreeNode node)
+    {
+        var parent = node.Parent;
+        while (parent != null)
+        {
+            var allChecked = parent.Children.All(c => c.IsChecked == true);
+            var allUnchecked = parent.Children.All(c => c.IsChecked == false);
+
+            if (allChecked) parent.IsChecked = true;
+            else if (allUnchecked) parent.IsChecked = false;
+            else parent.IsChecked = null;
+
+            parent = parent.Parent;
+        }
+    }
+    
+    private void CollectSelectedFiles(List<FileTreeNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.FullPath != null && node.IsChecked == true)
+            {
+                _selectedFiles.Add(node.FullPath);
+            }
+            CollectSelectedFiles(node.Children);
+        }
+    }
+
+    private void ToggleExpand(FileTreeNode node)
+    {
+        node.IsExpanded = !node.IsExpanded;
+    }
+
+    public class FileTreeNode
+    {
+        public string Name { get; set; } = "";
+        public string? FullPath { get; set; }
+        public List<FileTreeNode> Children { get; set; } = new();
+        public bool IsExpanded { get; set; } = true;
+        public bool? IsChecked { get; set; } = true;
+        public FileTreeNode? Parent { get; set; }
+    }
+}

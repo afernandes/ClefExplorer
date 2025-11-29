@@ -1,0 +1,106 @@
+@using Serilog.Events
+@using ClefExplorer.Helpers
+
+@if (Model is ScalarValue scalar)
+{
+    if (scalar.Value == null)
+    {
+        <span class="text-muted fst-italic">null</span>
+    }
+    else if (scalar.Value is string s)
+    {
+        <span class="text-break text-dark" style="white-space: pre-wrap;">@TextFormatter.Format(s)</span>
+    }
+    else
+    {
+        <span class="text-primary font-monospace">@scalar.Value</span>
+    }
+}
+else if (Model is StructureValue estrutura)
+{
+    <div class="table-responsive border rounded">
+        <table class="table table-sm table-striped mb-0" style="font-size: 0.85rem;">
+            <thead class="table-light">
+                <tr>
+                    <th scope="col" style="width: 30%">Propriedade</th>
+                    <th scope="col">Valor</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (LogEventProperty prop in estrutura.Properties)
+                {
+                    <tr>
+                        <td class="fw-semibold text-secondary text-break">@prop.Name</td>
+                        <td>
+                            @if (prop.Name.Contains("StackTrace", StringComparison.OrdinalIgnoreCase) && prop.Value is ScalarValue sv && sv.Value is string s)
+                            {
+                                <div class="overflow-auto" style="max-height: 300px;">
+                                    <pre class="mb-0 font-monospace" style="white-space: pre-wrap; font-size: 0.85rem;">@StackTraceHighlighter.Highlight(s)</pre>
+                                </div>
+                            }
+                            else if (prop.Name.Equals("X-Correlation-Id", StringComparison.OrdinalIgnoreCase) && prop.Value is ScalarValue svCorr && svCorr.Value is string sCorr)
+                            {
+                                var ids = sCorr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                                <div class="d-flex flex-wrap gap-2">
+                                    @foreach (var id in ids)
+                                    {
+                                        <button class="btn btn-sm btn-outline-primary font-monospace" @onclick="() => OnFilter.InvokeAsync(id)">@id</button>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <LogPropertyViewer Model="@prop.Value" OnFilter="OnFilter" />
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+else if (Model is SequenceValue sequence)
+{
+    <div class="d-flex flex-column gap-1">
+        @foreach (var item in sequence.Elements)
+        {
+            <div class="border-bottom pb-1 mb-1">
+                <LogPropertyViewer Model="@item" OnFilter="OnFilter" />
+            </div>
+        }
+    </div>
+}
+else if (Model is DictionaryValue dict)
+{
+    <div class="table-responsive border rounded">
+        <table class="table table-sm table-striped mb-0" style="font-size: 0.85rem;">
+            <thead class="table-light">
+                <tr>
+                    <th scope="col">Chave</th>
+                    <th scope="col">Valor</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var kvp in dict.Elements)
+                {
+                    <tr>
+                        <td><LogPropertyViewer Model="@kvp.Key" OnFilter="OnFilter" /></td>
+                        <td><LogPropertyViewer Model="@kvp.Value" OnFilter="OnFilter" /></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+else
+{
+    <div class="font-monospace text-muted">@Model?.ToString()</div>
+}
+
+@code {
+    [Parameter]
+    public LogEventPropertyValue? Model { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnFilter { get; set; }
+}

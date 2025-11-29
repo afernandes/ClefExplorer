@@ -1,0 +1,133 @@
+@using System.IO
+@using ClefExplorer.Models
+
+<aside class="bg-white border-end d-flex flex-column flex-shrink-0" style="width: @(Width)px; min-width: 200px;">
+    <div class="p-3">
+        <div class="d-grid dropdown">
+            <button class="btn btn-primary shadow-sm rounded-pill dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="bi bi-folder2-open me-2"></i> <span class="fw-semibold">Abrir</span>
+            </button>
+            <ul class="dropdown-menu w-100 shadow">
+                <li><button class="dropdown-item" @onclick="OnOpenFile"><i class="bi bi-file-earmark-text me-2"></i> Arquivo .clef</button></li>
+                <li><button class="dropdown-item" @onclick="OnOpenFolder"><i class="bi bi-folder me-2"></i> Pasta de logs</button></li>
+                <li><hr class="dropdown-divider"></li>
+                @if (LogGroups != null && LogGroups.Any())
+                {
+                    <li><h6 class="dropdown-header">Grupos</h6></li>
+                    @if (LogGroups != null)
+                    {
+                        foreach (var group in LogGroups)
+                        {
+                            <li><button class="dropdown-item" @onclick="() => OnOpenGroup.InvokeAsync(group)"><i class="bi bi-collection me-2"></i> @group.Name</button></li>
+                        }
+                    }
+                    <li><hr class="dropdown-divider"></li>
+                }
+                <li><button class="dropdown-item" @onclick="OnManageGroups"><i class="bi bi-gear me-2"></i> Gerenciar Grupos</button></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><button class="dropdown-item" @onclick="OnOpenSettings"><i class="bi bi-sliders me-2"></i> Configurações</button></li>
+            </ul>
+        </div>
+    </div>
+    
+    <div class="flex-grow-1 overflow-auto custom-scrollbar">
+        <div class="list-group list-group-flush px-2">
+            <div class="px-3 py-2 text-muted small fw-bold text-uppercase mt-2">Filtros Rápidos</div>
+            <a href="#" class="list-group-item list-group-item-action border-0 rounded-pill mb-1 @(FiltroRapido == "Todos" ? "active fw-bold" : "")" @onclick='() => SetFiltroRapido("Todos")' @onclick:preventDefault>
+                <i class="bi bi-inbox me-3"></i> Todos
+            </a>
+            <a href="#" class="list-group-item list-group-item-action border-0 rounded-pill mb-1 @(FiltroRapido == "Error" ? "active fw-bold" : "")" @onclick='() => SetFiltroRapido("Error")' @onclick:preventDefault>
+                <i class="bi bi-exclamation-octagon me-3 @(FiltroRapido == "Error" ? "" : "text-danger")"></i> Erros
+            </a>
+            <a href="#" class="list-group-item list-group-item-action border-0 rounded-pill mb-1 @(FiltroRapido == "Warning" ? "active fw-bold" : "")" @onclick='() => SetFiltroRapido("Warning")' @onclick:preventDefault>
+                <i class="bi bi-exclamation-triangle me-3 @(FiltroRapido == "Warning" ? "" : "text-warning")"></i> Avisos
+            </a>
+            <a href="#" class="list-group-item list-group-item-action border-0 rounded-pill mb-1 @(FiltroRapido == "Information" ? "active fw-bold" : "")" @onclick='() => SetFiltroRapido("Information")' @onclick:preventDefault>
+                <i class="bi bi-info-circle me-3 @(FiltroRapido == "Information" ? "" : "text-info")"></i> Informações
+            </a>
+        </div>
+
+        <div class="px-3 py-2 mt-2">
+            <div class="text-muted small fw-bold text-uppercase mb-2">Período</div>
+            <div class="mb-2">
+                <label class="form-label small text-muted mb-0">De:</label>
+                <input type="date" class="form-control form-control-sm" value="@(DataInicial?.ToString("yyyy-MM-dd"))" @onchange="OnDataInicialChange">
+            </div>
+            <div class="mb-2">
+                <label class="form-label small text-muted mb-0">Até:</label>
+                <input type="date" class="form-control form-control-sm" value="@(DataFinal?.ToString("yyyy-MM-dd"))" @onchange="OnDataFinalChange">
+            </div>
+        </div>
+
+        @if (AvailableFiles != null && AvailableFiles.Any())
+        {
+            <div class="list-group list-group-flush px-2 mt-3">
+                <div class="px-3 py-2 text-muted small fw-bold text-uppercase">Arquivos Carregados</div>
+                <LogFileTree Files="@AvailableFiles" CheckedFiles="@(VisibleFiles ?? LoadedFiles)" OnSelectionChanged="OnSelectionChanged" />
+            </div>
+        }
+    </div>
+</aside>
+
+@code {
+    [Parameter] public double Width { get; set; }
+    [Parameter] public string FiltroRapido { get; set; } = "Todos";
+    [Parameter] public EventCallback<string> FiltroRapidoChanged { get; set; }
+    
+    [Parameter] public HashSet<string>? VisibleFiles { get; set; }
+    [Parameter] public EventCallback<HashSet<string>?> VisibleFilesChanged { get; set; }
+
+    [Parameter] public DateTime? DataInicial { get; set; }
+    [Parameter] public EventCallback<DateTime?> DataInicialChanged { get; set; }
+
+    [Parameter] public DateTime? DataFinal { get; set; }
+    [Parameter] public EventCallback<DateTime?> DataFinalChanged { get; set; }
+
+    [Parameter] public IEnumerable<string> LoadedFiles { get; set; } = Enumerable.Empty<string>();
+    [Parameter] public IEnumerable<string> AvailableFiles { get; set; } = Enumerable.Empty<string>();
+    [Parameter] public IEnumerable<LogGroup> LogGroups { get; set; } = Enumerable.Empty<LogGroup>();
+
+    [Parameter] public EventCallback OnOpenFile { get; set; }
+    [Parameter] public EventCallback OnOpenFolder { get; set; }
+    [Parameter] public EventCallback<LogGroup> OnOpenGroup { get; set; }
+    [Parameter] public EventCallback OnManageGroups { get; set; }
+    [Parameter] public EventCallback OnOpenSettings { get; set; }
+
+    private async Task SetFiltroRapido(string filtro)
+    {
+        FiltroRapido = filtro;
+        await FiltroRapidoChanged.InvokeAsync(filtro);
+    }
+
+    private async Task OnSelectionChanged(HashSet<string> selectedFiles)
+    {
+        VisibleFiles = selectedFiles;
+        await VisibleFilesChanged.InvokeAsync(VisibleFiles);
+    }
+
+    private async Task OnDataInicialChange(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var date))
+        {
+            DataInicial = date;
+        }
+        else
+        {
+            DataInicial = null;
+        }
+        await DataInicialChanged.InvokeAsync(DataInicial);
+    }
+
+    private async Task OnDataFinalChange(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var date))
+        {
+            DataFinal = date;
+        }
+        else
+        {
+            DataFinal = null;
+        }
+        await DataFinalChanged.InvokeAsync(DataFinal);
+    }
+}

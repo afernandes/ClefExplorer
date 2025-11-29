@@ -1,0 +1,129 @@
+@using ClefExplorer.Models
+@using ClefExplorer.Helpers
+@inject IJSRuntime JSRuntime
+
+@using Serilog.Events
+
+<div class="h-100 overflow-auto custom-scrollbar">
+    @if (SelectedEvent != null)
+    {
+        <div class="p-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div class="d-flex align-items-center gap-3 text-muted small">
+                    <span class="badge @ObterClasseBadge(SelectedEvent.Level)">@SelectedEvent.Level</span>
+                    <span><i class="bi bi-calendar3 me-1"></i> @SelectedEvent.Timestamp?.ToString("dd/MM/yyyy")</span>
+                    <span><i class="bi bi-clock me-1"></i> @SelectedEvent.Timestamp?.ToString("HH:mm:ss.fff zzz")</span>
+                </div>
+                <button class="btn btn-close" @onclick="OnClose"></button>
+            </div>
+
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-header bg-white fw-bold border-bottom">Mensagem</div>
+                <div class="card-body bg-white">
+                    <div class="font-monospace text-dark" style="white-space: pre-wrap; font-size: 0.85rem;">@TextFormatter.Format(SelectedEvent.Message)</div>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(SelectedEvent.Exception))
+            {
+                <div class="card border-danger mb-4 shadow-sm">
+                    <div class="card-header bg-danger text-white d-flex align-items-center justify-content-between">
+                        <div>
+                            <i class="bi bi-exclamation-triangle-fill me-2"></i> Exceção
+                        </div>
+                        <button class="btn btn-sm btn-outline-light" @onclick="CopyException" title="Copiar Stack Trace">
+                            <i class="bi bi-clipboard"></i>
+                        </button>
+                    </div>
+                    <div class="card-body bg-white p-0">
+                        <div class="p-3 overflow-auto" style="max-height: 400px;">
+                            <pre class="mb-0 font-monospace" style="white-space: pre-wrap; font-size: 0.85rem;">@StackTraceHighlighter.Highlight(SelectedEvent.Exception)</pre>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-white fw-bold border-bottom">Propriedades</div>
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" style="font-size: 0.85rem;">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 30%">Chave</th>
+                                <th>Valor</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (SelectedEvent.Properties != null)
+                            {
+                                foreach (var p in SelectedEvent.Properties.OrderBy(x => x.Key))
+                                {
+                                    <tr>
+                                        <td class="fw-semibold text-secondary text-break">@p.Key</td>
+                                        <td class="text-break text-dark">
+                                            @if (p.Key.Contains("StackTrace", StringComparison.OrdinalIgnoreCase) && p.Value is ScalarValue sv && sv.Value is string s)
+                                            {
+                                                <div class="overflow-auto" style="max-height: 300px;">
+                                                    <pre class="mb-0 font-monospace" style="white-space: pre-wrap; font-size: 0.85rem;">@StackTraceHighlighter.Highlight(s)</pre>
+                                                </div>
+                                            }
+                                            else if (p.Key.Equals("X-Correlation-Id", StringComparison.OrdinalIgnoreCase) && p.Value is ScalarValue svCorr && svCorr.Value is string sCorr)
+                                            {
+                                                var ids = sCorr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                                                <div class="d-flex flex-wrap gap-2">
+                                                    @foreach (var id in ids)
+                                                    {
+                                                        <button class="btn btn-sm btn-outline-primary font-monospace" @onclick="() => OnFilter.InvokeAsync(id)">@id</button>
+                                                    }
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <LogPropertyViewer Model="@p.Value" OnFilter="OnFilter" />
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="d-flex flex-column align-items-center justify-content-center h-100 text-muted">
+            <i class="bi bi-file-earmark-text fs-1 mb-3 opacity-50"></i>
+            <p>Selecione um log para ver os detalhes</p>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public ClefEvent? SelectedEvent { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<string> OnFilter { get; set; }
+
+    private async Task CopyException()
+    {
+        if (SelectedEvent?.Exception != null)
+        {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", TextFormatter.Format(SelectedEvent.Exception));
+        }
+    }
+
+    private string ObterClasseBadge(string? level)
+    {
+        return level switch
+        {
+            "Debug" => "text-bg-secondary",
+            "Verbose" => "text-bg-light text-dark border",
+            "Error" => "text-bg-danger",
+            "Fatal" => "text-bg-dark",
+            "Information" => "text-bg-info text-white",
+            "Warning" => "text-bg-warning text-dark",
+            _ => "text-bg-secondary"
+        };
+    }
+}

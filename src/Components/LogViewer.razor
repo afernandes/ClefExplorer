@@ -1,0 +1,480 @@
+@using System.Threading
+@using ClefExplorer.Models
+@using ClefExplorer.Services
+
+@inject LogStore Store
+@inject LogGroupService GroupService
+@inject IJSRuntime JSRuntime
+@inject IFilePickerService FilePicker
+@inject FileAssociationService FileAssociationService
+
+@if (_isResizingSidebar || _isResizingList)
+{
+    <div class="resize-overlay" @onmousemove="HandleMouseMove" @onmouseup="HandleMouseUp"></div>
+}
+
+<div class="d-flex flex-column vh-100 bg-light">
+    <LogHeader @bind-TextoPesquisa="TextoPesquisa" 
+               @bind-QuantidadeRegistros="QuantidadeRegistros" 
+               OnReload="Carregar" />
+
+    @if (_showDefaultAppNotification)
+    {
+        <div class="alert alert-warning d-flex justify-content-between align-items-center m-0 rounded-0 border-bottom py-2 px-3" role="alert">
+            <div class="small">
+                <i class="bi bi-info-circle me-2"></i>
+                O Clef Explorer não é o aplicativo padrão para arquivos de log (.clef).
+            </div>
+            <div>
+                <button class="btn btn-sm btn-primary me-2" @onclick="SetAsDefaultApp">Definir como padrão</button>
+                <button type="button" class="btn-close btn-sm" aria-label="Close" @onclick="DismissNotification"></button>
+            </div>
+        </div>
+    }
+
+    <div class="d-flex flex-grow-1 overflow-hidden">
+        <LogSidebar Width="@_sidebarWidth"
+                    @bind-FiltroRapido="FiltroRapido"
+                    @bind-VisibleFiles="VisibleFiles"
+                    @bind-DataInicial="DataInicial"
+                    @bind-DataFinal="DataFinal"
+                    LoadedFiles="@Store.LoadedFiles"
+                    AvailableFiles="@Store.AvailableFiles"
+                    LogGroups="@GroupService.Groups"
+                    OnOpenFile="AbrirArquivoDialog"
+                    OnOpenFolder="AbrirPastaDialog"
+                    OnOpenGroup="AbrirGrupo"
+                    OnManageGroups="() => _showGroupManager = true"
+                    OnOpenSettings="() => _showSettings = true" />
+
+        <!-- Resizer Sidebar -->
+        <div class="resizer" @onmousedown="StartResizeSidebar" @onmousedown:preventDefault @onmousedown:stopPropagation></div>
+
+        <!-- Main Content -->
+        <main class="flex-grow-1 d-flex flex-column bg-white" style="min-width: 0;">
+            <LogToolbar Subtitulo="@Subtitulo"
+                        Pagina="@Pagina"
+                        UltimaPagina="@UltimaPagina"
+                        OnRefresh="Carregar"
+                        OnPreviousPage="PaginaAnterior"
+                        OnNextPage="ProximaPagina" />
+
+            <!-- Split View -->
+            <div class="d-flex flex-grow-1 overflow-hidden" id="split-container">
+                <!-- List -->
+                <div class="flex-grow-1 overflow-hidden border-end" style="flex-basis: @(_listPercentage)%;">
+                    <LogList IsBusy="@_isBusy"
+                             Eventos="@_eventos"
+                             SelectedEvent="@_selected"
+                             OnSelect="Select" />
+                </div>
+
+                <!-- Resizer List -->
+                <div class="resizer" @onmousedown="StartResizeList" @onmousedown:preventDefault @onmousedown:stopPropagation style="display: @(_selected == null ? "none" : "block")"></div>
+
+                <!-- Detail -->
+                <div class="bg-light overflow-hidden" style="flex-basis: @(100 - _listPercentage)%; display: @(_selected == null ? "none" : "block")">
+                    <LogDetails SelectedEvent="@_selected" OnClose="() => _selected = null" OnFilter="FiltrarPorTexto" />
+                </div>
+            </div>
+        </main>
+    </div>
+</div>
+
+<LogGroupManager @bind-IsVisible="_showGroupManager" OnGroupsChanged="StateHasChanged" />
+<SettingsDialog @bind-IsVisible="_showSettings" />
+
+<style>
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+        background: #f1f1f1; 
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #c1c1c1; 
+        border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #a8a8a8; 
+    }
+    .resizer {
+        width: 8px;
+        background-color: #e9ecef;
+        cursor: col-resize;
+        transition: background-color 0.2s;
+        z-index: 100;
+        flex-shrink: 0;
+        position: relative;
+    }
+    .resizer:hover, .resizer:active {
+        background-color: #0d6efd;
+    }
+    .resize-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 9999;
+        cursor: col-resize;
+        user-select: none;
+    }
+</style>
+
+@code {
+    private ClefEvent? _selected;
+    private bool _isBusy;
+    private List<ClefEvent> _todosEventos = new();
+    private List<ClefEvent> _eventos = new();
+    private int _quantidadeRegistros = 50;
+    private int _pagina = 1;
+    private string _textoPesquisa = string.Empty;
+    private string _filtroRapido = "Todos";
+    private HashSet<string>? _visibleFiles;
+    private DateTime? _dataInicial;
+    private DateTime? _dataFinal;
+    private CancellationTokenSource? _filterCts;
+    private bool _showGroupManager;
+    private bool _showSettings;
+    private bool _showDefaultAppNotification;
+
+    // Resizing state
+    private bool _isResizingSidebar;
+    private bool _isResizingList;
+    private double _sidebarWidth = 260;
+    private double _listPercentage = 40;
+    private double _cachedWindowWidth;
+
+    private void StartResizeSidebar(MouseEventArgs e)
+    {
+        _isResizingSidebar = true;
+    }
+
+    private async Task StartResizeList(MouseEventArgs e)
+    {
+        _isResizingList = true;
+        try 
+        {
+            _cachedWindowWidth = await JSRuntime.InvokeAsync<double>("eval", "window.innerWidth");
+        }
+        catch
+        {
+            _cachedWindowWidth = 1920; // Fallback
+        }
+    }
+
+    private void HandleMouseMove(MouseEventArgs e)
+    {
+        if (_isResizingSidebar)
+        {
+            _sidebarWidth = Math.Max(200, Math.Min(600, e.ClientX));
+            StateHasChanged();
+        }
+        else if (_isResizingList)
+        {
+             var availableWidth = _cachedWindowWidth - _sidebarWidth;
+             var relativeX = e.ClientX - _sidebarWidth;
+             
+             if (availableWidth > 0)
+             {
+                 _listPercentage = Math.Clamp((relativeX / availableWidth) * 100, 20, 80);
+                 StateHasChanged();
+             }
+        }
+    }
+
+    private void HandleMouseUp(MouseEventArgs e)
+    {
+        _isResizingSidebar = false;
+        _isResizingList = false;
+    }
+
+    private int QuantidadeRegistros
+    {
+        get => _quantidadeRegistros;
+        set
+        {
+            _quantidadeRegistros = value;
+            Pagina = 1; 
+            AtualizarPagina();
+        }
+    }
+
+    private int Pagina
+    {
+        get => _pagina;
+        set
+        {
+            _pagina = Math.Clamp(value, 1, UltimaPagina);
+            AtualizarPagina();
+        }
+    }
+
+    private int UltimaPagina => Math.Max(1, (int)Math.Ceiling((_todosEventos.Count) / (double)QuantidadeRegistros));
+    private string Subtitulo => _todosEventos.Count > 0 
+        ? $"{Math.Min((Pagina - 1) * QuantidadeRegistros + 1, _todosEventos.Count)}-{Math.Min(Pagina * QuantidadeRegistros, _todosEventos.Count)} de {_todosEventos.Count}"
+        : "0 de 0";
+
+    private string TextoPesquisa
+    {
+        get => _textoPesquisa;
+        set
+        {
+            _textoPesquisa = value;
+            AplicarFiltros();
+        }
+    }
+
+    private string FiltroRapido
+    {
+        get => _filtroRapido;
+        set
+        {
+            if (_filtroRapido != value)
+            {
+                _filtroRapido = value;
+                AplicarFiltros();
+            }
+        }
+    }
+
+    private HashSet<string>? VisibleFiles
+    {
+        get => _visibleFiles;
+        set
+        {
+            if (_visibleFiles != value)
+            {
+                _visibleFiles = value;
+                if (_visibleFiles != null)
+                {
+                    _ = Store.UpdateLoadedFiles(_visibleFiles);
+                }
+                AplicarFiltros();
+            }
+        }
+    }
+
+    private DateTime? DataInicial
+    {
+        get => _dataInicial;
+        set
+        {
+            if (_dataInicial != value)
+            {
+                _dataInicial = value;
+                AplicarFiltros();
+            }
+        }
+    }
+
+    private DateTime? DataFinal
+    {
+        get => _dataFinal;
+        set
+        {
+            if (_dataFinal != value)
+            {
+                _dataFinal = value;
+                AplicarFiltros();
+            }
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Store.Changed += () => InvokeAsync(() => {
+            _visibleFiles = null;
+            if (Store.IsLoading)
+            {
+                _isBusy = true;
+                StateHasChanged();
+            }
+            else
+            {
+                AplicarFiltros();
+            }
+        });
+
+        GroupService.Changed += () => InvokeAsync(StateHasChanged);
+
+        if (Store.IsLoading)
+        {
+            _isBusy = true;
+        }
+        else if (Store.Events.Any())
+        {
+            AplicarFiltros();
+        }
+
+        CheckDefaultApp();
+    }
+
+    private void CheckDefaultApp()
+    {
+        try
+        {
+            if (!FileAssociationService.IsDefaultHandler())
+            {
+                _showDefaultAppNotification = true;
+            }
+        }
+        catch
+        {
+            // Ignore errors checking association
+        }
+    }
+
+    private void SetAsDefaultApp()
+    {
+        FileAssociationService.SetAsDefault();
+        _showDefaultAppNotification = false;
+    }
+
+    private void DismissNotification()
+    {
+        _showDefaultAppNotification = false;
+    }
+
+    private void Carregar()
+    {
+        AplicarFiltros();
+    }
+
+    private async void AplicarFiltros()
+    {
+        _filterCts?.Cancel();
+        _filterCts = new CancellationTokenSource();
+        var token = _filterCts.Token;
+
+        _isBusy = true;
+        StateHasChanged();
+
+        try
+        {
+            await Task.Run(() => 
+            {
+                if (token.IsCancellationRequested) return;
+
+                IEnumerable<ClefEvent> fonte = Store.Events;
+
+                // Filtro Arquivo
+                if (_visibleFiles != null)
+                {
+                    fonte = fonte.Where(e => e.SourceFile != null && _visibleFiles.Contains(e.SourceFile));
+                }
+
+                // Filtro Rápido
+                if (_filtroRapido == "Error")
+                    fonte = fonte.Where(e => e != null && string.Equals(e.Level, "Error", StringComparison.OrdinalIgnoreCase) || string.Equals(e.Level, "Fatal", StringComparison.OrdinalIgnoreCase));
+                else if (_filtroRapido == "Warning")
+                    fonte = fonte.Where(e => string.Equals(e.Level, "Warning", StringComparison.OrdinalIgnoreCase));
+                else if (_filtroRapido == "Information")
+                    fonte = fonte.Where(e => string.Equals(e.Level, "Information", StringComparison.OrdinalIgnoreCase));
+
+                // Filtro Data
+                if (_dataInicial.HasValue)
+                    fonte = fonte.Where(e => e.Timestamp.HasValue && e.Timestamp.Value.Date >= _dataInicial.Value.Date);
+                
+                if (_dataFinal.HasValue)
+                    fonte = fonte.Where(e => e.Timestamp.HasValue && e.Timestamp.Value.Date <= _dataFinal.Value.Date);
+
+                // Pesquisa Texto
+                if (!string.IsNullOrWhiteSpace(_textoPesquisa))
+                {
+                    var b = _textoPesquisa.Trim();
+                    fonte = fonte.Where(e =>
+                        (e.Message ?? string.Empty).Contains(b, StringComparison.OrdinalIgnoreCase) ||
+                        (e.Exception ?? string.Empty).Contains(b, StringComparison.OrdinalIgnoreCase) ||
+                        (e.Properties != null && e.Properties.Any(p => p.Value.ToString().Contains(b, StringComparison.OrdinalIgnoreCase)))
+                    );
+                }
+
+                if (token.IsCancellationRequested) return;
+
+                // Materialize list in background
+                var result = fonte.OrderByDescending(e => e.Timestamp).ToList();
+
+                if (token.IsCancellationRequested) return;
+
+                InvokeAsync(() => 
+                {
+                    _todosEventos = result;
+                    if (_pagina > UltimaPagina) _pagina = 1;
+                    AtualizarPagina();
+                    _isBusy = false;
+                    StateHasChanged();
+                });
+
+            }, token);
+        }
+        catch (TaskCanceledException)
+        {
+            // Ignore
+        }
+        catch (Exception)
+        {
+            _isBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private void AtualizarPagina()
+    {
+        var skip = (Pagina - 1) * QuantidadeRegistros;
+        _eventos = _todosEventos.Skip(skip).Take(QuantidadeRegistros).ToList();
+    }
+
+    private async Task AbrirArquivoDialog()
+    {
+        var file = await FilePicker.PickFileAsync("Arquivos CLEF (*.clef)|*.clef|Todos os arquivos (*.*)|*.*");
+        if (file != null)
+        {
+            _isBusy = true;
+            StateHasChanged();
+            await Store.LoadFromFile(file);
+            _isBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task AbrirPastaDialog()
+    {
+        var folder = await FilePicker.PickFolderAsync();
+        if (folder != null)
+        {
+            _isBusy = true;
+            StateHasChanged();
+            await Store.LoadFromFolderAsync(folder);
+            _isBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task AbrirGrupo(LogGroup group)
+    {
+        if (group.Paths.Any())
+        {
+            _isBusy = true;
+            StateHasChanged();
+            await Store.LoadFromPathsAsync(group.Paths);
+            _isBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private void Select(ClefEvent e)
+    {
+        _selected = e;
+    }
+
+    private void FiltrarPorTexto(string texto)
+    {
+        TextoPesquisa = texto;
+    }
+
+    private void PaginaAnterior() => Pagina--;
+    private void ProximaPagina() => Pagina++;
+}

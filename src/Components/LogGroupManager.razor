@@ -1,0 +1,197 @@
+@using ClefExplorer.Models
+@using ClefExplorer.Services
+
+@inject LogGroupService GroupService
+@inject IFilePickerService FilePicker
+@inject IJSRuntime JSRuntime
+
+@if (IsVisible)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Gerenciar Grupos de Log</h5>
+                    <button type="button" class="btn-close" @onclick="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row h-100">
+                        <!-- List of Groups -->
+                        <div class="col-4 border-end">
+                            <div class="d-grid mb-3">
+                                <button class="btn btn-outline-primary btn-sm" @onclick="CreateNewGroup">
+                                    <i class="bi bi-plus-lg"></i> Novo Grupo
+                                </button>
+                            </div>
+                            <div class="list-group list-group-flush overflow-auto" style="max-height: 400px;">
+                                @foreach (var group in GroupService.Groups)
+                                {
+                                    <button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center @(ReferenceEquals(_editingGroup, group) ? "active" : "")" 
+                                            @onclick="() => EditGroup(group)">
+                                        <span class="text-truncate">@group.Name</span>
+                                        <i class="bi bi-chevron-right small"></i>
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        <!-- Edit Group -->
+                        <div class="col-8">
+                            @if (_editingGroup != null)
+                            {
+                                <div class="mb-3">
+                                    <label class="form-label">Nome do Grupo</label>
+                                    <input type="text" class="form-control" @bind="_editingGroup.Name" placeholder="Ex: Logs Produção">
+                                </div>
+
+                                <div class="mb-3">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <label class="form-label mb-0">Caminhos (Pastas ou Arquivos)</label>
+                                        <div class="dropdown">
+                                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                                                <i class="bi bi-plus"></i> Adicionar
+                                            </button>
+                                            <ul class="dropdown-menu">
+                                                <li><button class="dropdown-item" @onclick="AddFolder">Pasta</button></li>
+                                                <li><button class="dropdown-item" @onclick="AddFile">Arquivo</button></li>
+                                                <li><button class="dropdown-item" @onclick="AddManualPath">Caminho Manual</button></li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="list-group overflow-auto" style="max-height: 300px;">
+                                        @foreach (var path in _editingGroup.Paths.ToList())
+                                        {
+                                            <div class="list-group-item d-flex justify-content-between align-items-center p-2">
+                                                <div class="text-truncate small me-2" title="@path">@path</div>
+                                                <button class="btn btn-sm btn-link text-danger p-0" @onclick="() => RemovePath(path)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                        }
+                                        @if (!_editingGroup.Paths.Any())
+                                        {
+                                            <div class="text-muted small text-center py-3">Nenhum caminho adicionado</div>
+                                        }
+                                    </div>
+                                </div>
+
+                                <div class="d-flex justify-content-between mt-4">
+                                    <button class="btn btn-outline-danger" @onclick="DeleteCurrentGroup">Excluir Grupo</button>
+                                    <button class="btn btn-primary" @onclick="SaveCurrentGroup">Salvar Alterações</button>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="d-flex flex-column align-items-center justify-content-center h-100 text-muted">
+                                    <i class="bi bi-collection fs-1 mb-2"></i>
+                                    <p>Selecione ou crie um grupo</p>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public EventCallback<bool> IsVisibleChanged { get; set; }
+    [Parameter] public EventCallback OnGroupsChanged { get; set; }
+
+    private LogGroup? _editingGroup;
+
+    private void Close()
+    {
+        IsVisible = false;
+        IsVisibleChanged.InvokeAsync(false);
+        _editingGroup = null;
+    }
+
+    private void CreateNewGroup()
+    {
+        _editingGroup = new LogGroup { Name = "Novo Grupo" };
+    }
+
+    private void EditGroup(LogGroup group)
+    {
+        // Clone to avoid editing directly before save
+        _editingGroup = new LogGroup 
+        { 
+            Id = group.Id, 
+            Name = group.Name, 
+            Paths = new List<string>(group.Paths) 
+        };
+    }
+
+    private async Task AddFolder()
+    {
+        if (_editingGroup == null) return;
+        var folder = await FilePicker.PickFolderAsync();
+        if (!string.IsNullOrEmpty(folder) && !_editingGroup.Paths.Contains(folder))
+        {
+            _editingGroup.Paths.Add(folder);
+        }
+    }
+
+    private async Task AddFile()
+    {
+        if (_editingGroup == null) return;
+        var file = await FilePicker.PickFileAsync("Arquivos CLEF (*.clef)|*.clef|Todos os arquivos (*.*)|*.*");
+        if (!string.IsNullOrEmpty(file) && !_editingGroup.Paths.Contains(file))
+        {
+            _editingGroup.Paths.Add(file);
+        }
+    }
+
+    private async Task AddManualPath()
+    {
+        if (_editingGroup == null) return;
+        
+        var path = await JSRuntime.InvokeAsync<string>("prompt", "Digite o caminho completo ou com variáveis de ambiente (ex: %localappdata%\\MyApp\\Logs):");
+        
+        if (!string.IsNullOrWhiteSpace(path) && !_editingGroup.Paths.Contains(path))
+        {
+            _editingGroup.Paths.Add(path);
+        }
+    }
+
+    private void RemovePath(string path)
+    {
+        _editingGroup?.Paths.Remove(path);
+    }
+
+    private void SaveCurrentGroup()
+    {
+        if (_editingGroup == null) return;
+
+        if (string.IsNullOrWhiteSpace(_editingGroup.Name))
+        {
+            // Show error?
+            return;
+        }
+
+        var existing = GroupService.Groups.FirstOrDefault(g => g.Id == _editingGroup.Id);
+        if (existing != null)
+        {
+            GroupService.UpdateGroup(_editingGroup);
+        }
+        else
+        {
+            GroupService.AddGroup(_editingGroup);
+        }
+        
+        OnGroupsChanged.InvokeAsync();
+        _editingGroup = null; // Deselect after save
+    }
+
+    private void DeleteCurrentGroup()
+    {
+        if (_editingGroup == null) return;
+        GroupService.DeleteGroup(_editingGroup.Id);
+        OnGroupsChanged.InvokeAsync();
+        _editingGroup = null;
+    }
+}
