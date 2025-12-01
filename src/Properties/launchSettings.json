@@ -1,8 +1,7 @@
 {
   "profiles": {
     "ClefExplorer": {
-      "commandName": "Project",
-      "commandLineArgs": "C:\\Users\\ander\\AppData\\Local\\Packages\\cab27191-0e0a-428d-9e66-80685c4e7393_gnw0466hkgph6\\LocalState\\Logs\\Backup\\log20251127.clef.gz"
+      "commandName": "Project"
     }
   }
 }

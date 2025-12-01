@@ -48,6 +48,10 @@ else if (Model is StructureValue estrutura)
                                     }
                                 </div>
                             }
+                            else if (prop.Name.Equals("EventType", StringComparison.OrdinalIgnoreCase) && prop.Value is ScalarValue svType && svType.Value != null)
+                            {
+                                <button class="btn btn-sm btn-outline-primary font-monospace" @onclick="() => OnFilter.InvokeAsync(svType.Value.ToString())">@svType.Value</button>
+                            }
                             else
                             {
                                 <LogPropertyViewer Model="@prop.Value" OnFilter="OnFilter" />
