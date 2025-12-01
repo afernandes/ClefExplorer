@@ -16,6 +16,14 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <AssemblyTitle>ClefExplorer</AssemblyTitle>
+    <Product>Clef Explorer</Product>
+    <Description>O Clef Explorer é um visualizador moderno e ágil para logs estruturados no formato CLEF (Compact Log Event Format).</Description>
+    <Authors>Anderson Fernandes do Nascimento</Authors>
+    <Company>Anderson Fernandes do Nascimento</Company>
+    <Copyright>Copyright © 2025 Anderson Fernandes</Copyright>
+    <PackageProjectUrl>https://github.com/afernandes/ClefExplorer</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/afernandes/ClefExplorer.git</RepositoryUrl>
+    <PackageTags>log;serilog;clef;viewer;blazor;winforms;structured-logging</PackageTags>
     <Version>1.0.0</Version>
     <FileVersion>1.0.0.0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
