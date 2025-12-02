@@ -2,7 +2,14 @@
 
 O **ClefExplorer** é uma aplicação desktop moderna desenvolvida para facilitar a leitura, análise e monitoramento de logs estruturados no formato **CLEF (Compact Log Event Format)**. Construído com **.NET 10**, **Windows Forms** e **Blazor Hybrid**, ele oferece uma interface ágil e rica para desenvolvedores e administradores de sistemas que utilizam Serilog ou outras bibliotecas de log estruturado.
 
-<img width="1241" height="793" alt="ClefExplorer" src="https://github.com/user-attachments/assets/c2bd8b79-673c-427a-8244-4d75498aea3e" />
+![screenshot](screenshot.png?raw=true "Screenshot")
+
+## Download
+As versões estão disponíveis neste repositório do GitHub junto com a Windows Store
+
+### Windows
+<a href='https://www.microsoft.com/store/apps/9MVZN1HVJ230?cid=storebadge&ocid=badge'><img src='English_get-it-from-MS_InvariantCulture_Default.png' alt='English badge' style='height: 38px;' height="38" /></a>
+
 
 ## 🚀 Funcionalidades Principais
 
