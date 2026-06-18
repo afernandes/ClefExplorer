@@ -1,68 +1,70 @@
 @using System.IO
 @using ClefExplorer.Models
 
-<aside class="bg-white border-end d-flex flex-column flex-shrink-0" style="width: @(Width)px; min-width: 200px;">
-    <div class="p-3">
-        <div class="d-grid dropdown">
-            <button class="btn btn-primary shadow-sm rounded-pill dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                <i class="bi bi-folder2-open me-2"></i> <span class="fw-semibold">Abrir</span>
-            </button>
-            <ul class="dropdown-menu w-100 shadow">
-                <li><button class="dropdown-item" @onclick="OnOpenFile"><i class="bi bi-file-earmark-text me-2"></i> Arquivo .clef</button></li>
-                <li><button class="dropdown-item" @onclick="OnOpenFolder"><i class="bi bi-folder me-2"></i> Pasta de logs</button></li>
-                <li><hr class="dropdown-divider"></li>
-                @if (LogGroups != null && LogGroups.Any())
-                {
-                    <li><h6 class="dropdown-header">Grupos</h6></li>
-                    @if (LogGroups != null)
+<aside class="clef-sidebar">
+    <div class="clef-sidebar-pad">
+        <OmniPopover Open="_abrirOpen" OpenChanged="@(v => _abrirOpen = v)" ShowArrow="false" Offset="4" Width="240px" Class="clef-abrir-pop">
+            <Trigger>
+                <OmniButton Text="Abrir" Icon="folder" Variant="ButtonVariant.Primary" Block="true" />
+            </Trigger>
+            <ChildContent>
+                <OmniMenu>
+                    <OmniMenuItem Text="Arquivo .clef" Icon="file-text" OnClick="@(() => Exec(() => OnOpenFile.InvokeAsync()))" />
+                    <OmniMenuItem Text="Pasta de logs" Icon="folder" OnClick="@(() => Exec(() => OnOpenFolder.InvokeAsync()))" />
+                    @if (LogGroups != null && LogGroups.Any())
                     {
-                        foreach (var group in LogGroups)
+                        <OmniMenuSeparator />
+                        @foreach (var group in LogGroups)
                         {
-                            <li><button class="dropdown-item" @onclick="() => OnOpenGroup.InvokeAsync(group)"><i class="bi bi-collection me-2"></i> @group.Name</button></li>
+                            var g = group;
+                            <OmniMenuItem Text="@g.Name" Icon="layers" OnClick="@(() => Exec(() => OnOpenGroup.InvokeAsync(g)))" />
                         }
                     }
-                    <li><hr class="dropdown-divider"></li>
-                }
-                <li><button class="dropdown-item" @onclick="OnManageGroups"><i class="bi bi-gear me-2"></i> Gerenciar Grupos</button></li>
-                <li><hr class="dropdown-divider"></li>
-                <li><button class="dropdown-item" @onclick="OnOpenSettings"><i class="bi bi-sliders me-2"></i> Configurações</button></li>
-            </ul>
-        </div>
+                    <OmniMenuSeparator />
+                    <OmniMenuItem Text="Gerenciar Grupos" Icon="settings" OnClick="@(() => Exec(() => OnManageGroups.InvokeAsync()))" />
+                    <OmniMenuItem Text="Configurações" Icon="sliders" OnClick="@(() => Exec(() => OnOpenSettings.InvokeAsync()))" />
+                </OmniMenu>
+            </ChildContent>
+        </OmniPopover>
     </div>
-    
-    <div class="flex-grow-1 overflow-auto custom-scrollbar">
-        <div class="list-group list-group-flush px-2">
-            <div class="px-3 py-2 text-muted small fw-bold text-uppercase mt-2">Filtros Rápidos</div>
-            <a href="#" class="list-group-item list-group-item-action border-0 rounded-pill mb-1 @(FiltroRapido == "Todos" ? "active fw-bold" : "")" @onclick='() => SetFiltroRapido("Todos")' @onclick:preventDefault>
-                <i class="bi bi-inbox me-3"></i> Todos
-            </a>
-            <a href="#" class="list-group-item list-group-item-action border-0 rounded-pill mb-1 @(FiltroRapido == "Error" ? "active fw-bold" : "")" @onclick='() => SetFiltroRapido("Error")' @onclick:preventDefault>
-                <i class="bi bi-exclamation-octagon me-3 @(FiltroRapido == "Error" ? "" : "text-danger")"></i> Erros
-            </a>
-            <a href="#" class="list-group-item list-group-item-action border-0 rounded-pill mb-1 @(FiltroRapido == "Warning" ? "active fw-bold" : "")" @onclick='() => SetFiltroRapido("Warning")' @onclick:preventDefault>
-                <i class="bi bi-exclamation-triangle me-3 @(FiltroRapido == "Warning" ? "" : "text-warning")"></i> Avisos
-            </a>
-            <a href="#" class="list-group-item list-group-item-action border-0 rounded-pill mb-1 @(FiltroRapido == "Information" ? "active fw-bold" : "")" @onclick='() => SetFiltroRapido("Information")' @onclick:preventDefault>
-                <i class="bi bi-info-circle me-3 @(FiltroRapido == "Information" ? "" : "text-info")"></i> Informações
-            </a>
+
+    <div class="clef-sidebar-scroll">
+        <div class="clef-section-label">Filtros Rápidos</div>
+        <div class="clef-filters">
+            <button type="button" class="clef-filter @(FiltroRapido == "Todos" ? "is-active" : "")" @onclick='() => SetFiltroRapido("Todos")'>
+                <OmniIcon Name="inbox" Size="ComponentSize.Sm" />
+                <span>Todos</span>
+            </button>
+            <button type="button" class="clef-filter clef-filter-error @(FiltroRapido == "Error" ? "is-active" : "")" @onclick='() => SetFiltroRapido("Error")'>
+                <OmniIcon Name="alert-circle" Size="ComponentSize.Sm" />
+                <span>Erros</span>
+            </button>
+            <button type="button" class="clef-filter clef-filter-warn @(FiltroRapido == "Warning" ? "is-active" : "")" @onclick='() => SetFiltroRapido("Warning")'>
+                <OmniIcon Name="alert-triangle" Size="ComponentSize.Sm" />
+                <span>Avisos</span>
+            </button>
+            <button type="button" class="clef-filter clef-filter-info @(FiltroRapido == "Information" ? "is-active" : "")" @onclick='() => SetFiltroRapido("Information")'>
+                <OmniIcon Name="info" Size="ComponentSize.Sm" />
+                <span>Informações</span>
+            </button>
         </div>
 
-        <div class="px-3 py-2 mt-2">
-            <div class="text-muted small fw-bold text-uppercase mb-2">Período</div>
-            <div class="mb-2">
-                <label class="form-label small text-muted mb-0">De:</label>
-                <input type="date" class="form-control form-control-sm" value="@(DataInicial?.ToString("yyyy-MM-dd"))" @onchange="OnDataInicialChange">
+        <div class="clef-section-label">Período</div>
+        <div class="clef-period">
+            <div>
+                <div class="clef-field-label">De:</div>
+                <OmniDatePicker TValue="DateTime?" Value="DataInicial" ValueChanged="OnDataInicialChanged" Clearable="true" Placeholder="dd/mm/aaaa" />
             </div>
-            <div class="mb-2">
-                <label class="form-label small text-muted mb-0">Até:</label>
-                <input type="date" class="form-control form-control-sm" value="@(DataFinal?.ToString("yyyy-MM-dd"))" @onchange="OnDataFinalChange">
+            <div>
+                <div class="clef-field-label">Até:</div>
+                <OmniDatePicker TValue="DateTime?" Value="DataFinal" ValueChanged="OnDataFinalChanged" Clearable="true" Placeholder="dd/mm/aaaa" />
             </div>
         </div>
 
         @if (AvailableFiles != null && AvailableFiles.Any())
         {
-            <div class="list-group list-group-flush px-2 mt-3">
-                <div class="px-3 py-2 text-muted small fw-bold text-uppercase">Arquivos Carregados</div>
+            <div class="clef-section-label">Arquivos Carregados</div>
+            <div class="clef-tree">
                 <LogFileTree Files="@AvailableFiles" CheckedFiles="@(VisibleFiles ?? LoadedFiles)" OnSelectionChanged="OnSelectionChanged" />
             </div>
         }
@@ -70,10 +72,9 @@
 </aside>
 
 @code {
-    [Parameter] public double Width { get; set; }
     [Parameter] public string FiltroRapido { get; set; } = "Todos";
     [Parameter] public EventCallback<string> FiltroRapidoChanged { get; set; }
-    
+
     [Parameter] public HashSet<string>? VisibleFiles { get; set; }
     [Parameter] public EventCallback<HashSet<string>?> VisibleFilesChanged { get; set; }
 
@@ -93,6 +94,15 @@
     [Parameter] public EventCallback OnManageGroups { get; set; }
     [Parameter] public EventCallback OnOpenSettings { get; set; }
 
+    private bool _abrirOpen;
+
+    /// <summary>Fecha o popover e dispara a ação do item escolhido.</summary>
+    private async Task Exec(Func<Task> action)
+    {
+        _abrirOpen = false;
+        await action();
+    }
+
     private async Task SetFiltroRapido(string filtro)
     {
         FiltroRapido = filtro;
@@ -105,29 +115,15 @@
         await VisibleFilesChanged.InvokeAsync(VisibleFiles);
     }
 
-    private async Task OnDataInicialChange(ChangeEventArgs e)
+    private async Task OnDataInicialChanged(DateTime? value)
     {
-        if (DateTime.TryParse(e.Value?.ToString(), out var date))
-        {
-            DataInicial = date;
-        }
-        else
-        {
-            DataInicial = null;
-        }
-        await DataInicialChanged.InvokeAsync(DataInicial);
+        DataInicial = value;
+        await DataInicialChanged.InvokeAsync(value);
     }
 
-    private async Task OnDataFinalChange(ChangeEventArgs e)
+    private async Task OnDataFinalChanged(DateTime? value)
     {
-        if (DateTime.TryParse(e.Value?.ToString(), out var date))
-        {
-            DataFinal = date;
-        }
-        else
-        {
-            DataFinal = null;
-        }
-        await DataFinalChanged.InvokeAsync(DataFinal);
+        DataFinal = value;
+        await DataFinalChanged.InvokeAsync(value);
     }
 }

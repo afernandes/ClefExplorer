@@ -1,21 +1,34 @@
 @using System.IO
 @using System.Text.RegularExpressions
 
-<div class="file-tree custom-scrollbar">
-    @if (RootNodes.Any())
-    {
-        <ul class="list-unstyled ps-0 mb-0">
-            @foreach (var node in RootNodes)
-            {
-                <FileTreeNodeItem Node="@node" OnToggleExpand="ToggleExpand" OnToggleCheck="ToggleCheck" />
-            }
-        </ul>
-    }
-    else
-    {
-        <div class="text-muted small p-3 text-center">Nenhum arquivo carregado</div>
-    }
-</div>
+@if (RootNodes.Any())
+{
+    <OmniTree Data="RootNodes"
+              AllowCheckboxes="true"
+              CheckedValues="_checkedNodes"
+              CheckedValuesChanged="OnCheckedChanged">
+        <OmniTreeLevel Text="@(o => ((FileTreeNode)o).Name)"
+                       Children="@(o => ((FileTreeNode)o).Children)"
+                       HasChildren="@(o => ((FileTreeNode)o).Children.Count > 0)"
+                       Expanded="@(o => true)"
+                       Icon="@(o => NodeIcon((FileTreeNode)o))">
+            <Template Context="item">
+                @{ var bk = item.Value is FileTreeNode fn && fn.IsBackup; }
+                @if (!string.IsNullOrEmpty(item.Icon))
+                {
+                    <OmniIcon Name="@item.Icon" Size="ComponentSize.Sm" Class="@(bk ? "omni-tree-icon clef-tree-backup" : "omni-tree-icon")" />
+                }
+                <span class="@(bk ? "omni-tree-text clef-tree-backup" : "omni-tree-text")">@item.Text</span>
+            </Template>
+        </OmniTreeLevel>
+    </OmniTree>
+}
+else
+{
+    <div class="clef-center" style="height:auto; padding:16px;">
+        <span style="font-size:12px;">Nenhum arquivo carregado</span>
+    </div>
+}
 
 @code {
     [Parameter] public IEnumerable<string> Files { get; set; } = Enumerable.Empty<string>();
@@ -23,44 +36,86 @@
     [Parameter] public EventCallback<HashSet<string>> OnSelectionChanged { get; set; }
 
     private List<FileTreeNode> RootNodes { get; set; } = new();
-    private HashSet<string> _selectedFiles = new();
+    private List<object> _checkedNodes = new();
     private List<string>? _lastFiles;
-    private HashSet<string>? _lastCheckedFiles;
 
     protected override void OnParametersSet()
     {
         var currentFiles = Files?.OrderBy(f => f).ToList() ?? new List<string>();
-        var currentChecked = CheckedFiles != null ? new HashSet<string>(CheckedFiles, StringComparer.OrdinalIgnoreCase) : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        
         bool filesChanged = _lastFiles == null || !currentFiles.SequenceEqual(_lastFiles);
-        // We only care about external checked changes if files didn't change, 
-        // but usually if files change we rebuild anyway.
-        // Also, if the user clicks a checkbox, OnSelectionChanged fires, parent updates CheckedFiles, 
-        // and we come back here. We should avoid loop.
-        // But here we are just syncing state.
-        
+
+        // Só (re)derivamos o estado dos checkboxes quando a ÁRVORE muda (novo
+        // conjunto de arquivos). Durante a interação, o OmniTree é a fonte única
+        // do estado de marcação — re-derivar a cada eco de CheckedFiles
+        // dessincronizava pais/filhos (ex.: pasta marcada sem nenhum filho).
         if (filesChanged)
         {
             _lastFiles = currentFiles;
-            _lastCheckedFiles = currentChecked;
+            var currentChecked = CheckedFiles != null
+                ? new HashSet<string>(CheckedFiles, StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             BuildTree();
-        }
-        else if (_lastCheckedFiles == null || !currentChecked.SetEquals(_lastCheckedFiles))
-        {
-             _lastCheckedFiles = currentChecked;
-             ApplyCheckStates(RootNodes, currentChecked);
-             UpdateAllAncestors(RootNodes);
-             
-             // Sync internal selected files
-             _selectedFiles.Clear();
-             foreach(var f in currentChecked) _selectedFiles.Add(f);
+            _checkedNodes = ComputeChecked(currentChecked);
         }
     }
+
+    private static string NodeIcon(FileTreeNode node)
+    {
+        if (node.IsBackup) return "archive";
+        if (!string.IsNullOrEmpty(node.FullPath)) return "file-text";
+        return "folder";
+    }
+
+    // Marca as folhas presentes em checkedFiles e os nós cujos descendentes (e o
+    // próprio arquivo, se houver) estejam todos marcados — reproduz o estado
+    // tri-state inicial (OmniTree calcula o indeterminate dos demais a partir disso).
+    private List<object> ComputeChecked(HashSet<string> checkedFiles)
+    {
+        var result = new List<object>();
+        bool Walk(FileTreeNode n)
+        {
+            var hasFile = !string.IsNullOrEmpty(n.FullPath);
+
+            // Folha pura: marcada sse o arquivo está carregado.
+            if (n.Children.Count == 0)
+            {
+                var on = hasFile && checkedFiles.Contains(n.FullPath!);
+                if (on) result.Add(n);
+                return on;
+            }
+
+            // Nó com filhos. IMPORTANTE: um nó pode ser arquivo E pasta ao mesmo
+            // tempo (ex.: "Fiscal.clef" + "Fiscal.Zeus.*.clef" → nó "Fiscal" com
+            // FullPath e Children). Avaliamos TODOS os filhos (para marcá-los
+            // individualmente) e só consideramos o nó "marcado" se todos os filhos
+            // E o próprio arquivo (quando existir) estiverem marcados — senão fica
+            // indeterminado, evitando o bug de "pasta marcada sem filhos".
+            bool all = true;
+            foreach (var c in n.Children) all &= Walk(c);
+            if (hasFile) all &= checkedFiles.Contains(n.FullPath!);
+            if (all) result.Add(n);
+            return all;
+        }
+        foreach (var root in RootNodes) Walk(root);
+        return result;
+    }
+
+    private async Task OnCheckedChanged(IEnumerable<object> checkedNodes)
+    {
+        _checkedNodes = checkedNodes.ToList();
+        var files = _checkedNodes
+            .OfType<FileTreeNode>()
+            .Where(n => !string.IsNullOrEmpty(n.FullPath))
+            .Select(n => n.FullPath!);
+        var set = new HashSet<string>(files, StringComparer.OrdinalIgnoreCase);
+        await OnSelectionChanged.InvokeAsync(set);
+    }
+
+    // ─── Construção da árvore virtual (lógica preservada da versão Bootstrap) ───
 
     private void BuildTree()
     {
         RootNodes.Clear();
-        _selectedFiles.Clear();
 
         if (_lastFiles == null || !_lastFiles.Any()) return;
 
@@ -71,27 +126,70 @@
             var pathParts = GetVirtualPathParts(file, commonSegments);
             AddNodeToTree(RootNodes, pathParts, file);
         }
-        
+
         SortNodes(RootNodes);
         CollapseSingleChildNodes(RootNodes);
-        
-        if (_lastCheckedFiles != null)
-        {
-            ApplyCheckStates(RootNodes, _lastCheckedFiles);
-            UpdateAllAncestors(RootNodes);
-            foreach(var f in _lastCheckedFiles) _selectedFiles.Add(f);
-        }
-        
-        UpdateExpansionState(RootNodes);
+        SplitFileAndFolderNodes(RootNodes);
+        PromoteBackupToRoot();
     }
 
-    private void UpdateExpansionState(List<FileTreeNode> nodes)
+    // Move os nós "Backup" para o nível raiz, no início da árvore (fora de "Logs"),
+    // marcando-os para receberem ícone/cor próprios (reforço visual de backup).
+    private void PromoteBackupToRoot()
+    {
+        var backups = new List<FileTreeNode>();
+
+        void Collect(List<FileTreeNode> nodes)
+        {
+            for (int i = nodes.Count - 1; i >= 0; i--)
+            {
+                var n = nodes[i];
+                if (string.IsNullOrEmpty(n.FullPath) &&
+                    string.Equals(n.Name, "Backup", StringComparison.OrdinalIgnoreCase))
+                {
+                    n.IsBackup = true;
+                    n.Parent = null;
+                    backups.Add(n);
+                    nodes.RemoveAt(i);
+                }
+                else
+                {
+                    Collect(n.Children);
+                }
+            }
+        }
+
+        Collect(RootNodes);
+
+        // Insere no início, preservando a ordem original.
+        backups.Reverse();
+        for (int i = 0; i < backups.Count; i++)
+        {
+            RootNodes.Insert(i, backups[i]);
+        }
+    }
+
+    // Quando um nó é arquivo E pasta ao mesmo tempo (existe um log cujo nome é
+    // prefixo de outros — ex.: "...Fiscal.clef" + "...Fiscal.Zeus.*.clef"),
+    // extrai o arquivo próprio para um sub-item folha, permitindo selecioná-lo/
+    // exibi-lo isoladamente. O nó passa a ser uma pasta pura.
+    private void SplitFileAndFolderNodes(List<FileTreeNode> nodes)
     {
         foreach (var node in nodes)
         {
-            // Expand if checked or indeterminate. Collapse if unchecked.
-            node.IsExpanded = node.IsChecked != false;
-            UpdateExpansionState(node.Children);
+            SplitFileAndFolderNodes(node.Children);
+
+            if (!string.IsNullOrEmpty(node.FullPath) && node.Children.Count > 0)
+            {
+                var ownFile = new FileTreeNode
+                {
+                    Name = node.Name,
+                    FullPath = node.FullPath,
+                    Parent = node
+                };
+                node.FullPath = null;          // o nó vira pasta pura
+                node.Children.Insert(0, ownFile); // o arquivo próprio aparece primeiro
+            }
         }
     }
 
@@ -100,13 +198,13 @@
         if (files.Count == 0) return Array.Empty<string>();
 
         var commonSegments = GetDirSegments(files[0]);
-        
+
         foreach (var file in files.Skip(1))
         {
             var segments = GetDirSegments(file);
             int matchLength = 0;
             int minLen = Math.Min(commonSegments.Length, segments.Length);
-            
+
             for (int i = 0; i < minLen; i++)
             {
                 if (string.Equals(commonSegments[i], segments[i], StringComparison.OrdinalIgnoreCase))
@@ -114,13 +212,13 @@
                 else
                     break;
             }
-            
+
             if (matchLength < commonSegments.Length)
                 commonSegments = commonSegments.Take(matchLength).ToArray();
-            
+
             if (commonSegments.Length == 0) break;
         }
-        
+
         return commonSegments;
     }
 
@@ -135,7 +233,7 @@
     {
         var isGz = file.EndsWith(".gz", StringComparison.OrdinalIgnoreCase);
         var fileName = Path.GetFileName(file);
-        
+
         var fileSegments = GetDirSegments(file);
         var skipCount = Math.Max(0, commonSegments.Length - 1);
         var pathParts = fileSegments.Skip(skipCount).ToList();
@@ -150,7 +248,7 @@
                 pathParts.Add(match.Groups[1].Value); // Year
                 pathParts.Add(match.Groups[2].Value); // Month
                 pathParts.Add(match.Groups[3].Value); // Day
-                
+
                 cleanName = Regex.Replace(fileName, @"(?:^|\.)log\d+\.clef\.gz$", "", RegexOptions.IgnoreCase);
                 if (string.IsNullOrWhiteSpace(cleanName)) cleanName = "log";
             }
@@ -178,7 +276,7 @@
         {
             fileName = cleanName;
         }
-        
+
         pathParts.Add(fileName);
         return pathParts;
     }
@@ -191,7 +289,7 @@
         {
             var part = pathParts[i];
             var isLast = i == pathParts.Count - 1;
-            
+
             var currentNode = currentLevel.FirstOrDefault(n => n.Name.Equals(part, StringComparison.OrdinalIgnoreCase));
             if (currentNode == null)
             {
@@ -218,8 +316,8 @@
         for (int i = 0; i < nodes.Count; i++)
         {
             var node = nodes[i];
-            while (string.IsNullOrEmpty(node.FullPath) && 
-                   node.Children.Count == 1 && 
+            while (string.IsNullOrEmpty(node.FullPath) &&
+                   node.Children.Count == 1 &&
                    string.IsNullOrEmpty(node.Children[0].FullPath))
             {
                 node = node.Children[0];
@@ -231,129 +329,22 @@
 
     private void SortNodes(List<FileTreeNode> nodes)
     {
-        // Sort folders first, then files
-        nodes.Sort((a, b) => 
+        // Pastas primeiro, depois arquivos; ambos em ordem alfabética.
+        nodes.Sort((a, b) =>
         {
             var aIsFolder = a.Children.Any();
             var bIsFolder = b.Children.Any();
-            
+
             if (aIsFolder && !bIsFolder) return -1;
             if (!aIsFolder && bIsFolder) return 1;
-            
+
             return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
         });
-        
+
         foreach (var node in nodes)
         {
             SortNodes(node.Children);
         }
-    }
-
-    private void ApplyCheckStates(List<FileTreeNode> nodes, HashSet<string> checkedFiles)
-    {
-        foreach (var node in nodes)
-        {
-            if (node.FullPath != null)
-            {
-                node.IsChecked = checkedFiles.Contains(node.FullPath);
-            }
-            ApplyCheckStates(node.Children, checkedFiles);
-        }
-    }
-    
-    private void UpdateAllAncestors(List<FileTreeNode> nodes)
-    {
-        foreach (var node in nodes)
-        {
-            UpdateAllAncestors(node.Children);
-            // We need to update ancestors from bottom up, but this recursion goes top down then bottom up?
-            // Actually UpdateAncestors(node) updates parents.
-            // So we just need to ensure leaves are correct, then update parents.
-            // But ApplyCheckStates sets leaves (and intermediate nodes if they have FullPath, which they shouldn't usually).
-            // Intermediate nodes check state depends on children.
-        }
-        
-        // A better way: Post-order traversal to set directory check states
-        foreach (var node in nodes)
-        {
-            UpdateDirectoryCheckState(node);
-        }
-    }
-
-    private void UpdateDirectoryCheckState(FileTreeNode node)
-    {
-        foreach (var child in node.Children)
-        {
-            UpdateDirectoryCheckState(child);
-        }
-        
-        if (node.Children.Any())
-        {
-            var allChecked = node.Children.All(c => c.IsChecked == true);
-            var allUnchecked = node.Children.All(c => c.IsChecked == false);
-
-            if (allChecked) node.IsChecked = true;
-            else if (allUnchecked) node.IsChecked = false;
-            else node.IsChecked = null;
-        }
-    }
-
-    private async Task ToggleCheck(FileTreeNode node)
-    {
-        var newState = node.IsChecked != true; // Toggle
-        SetCheckState(node, newState);
-        UpdateAncestors(node);
-        
-        // Re-calculate selected files
-        _selectedFiles.Clear();
-        CollectSelectedFiles(RootNodes);
-        
-        // Update internal state to avoid loop issues
-        _lastCheckedFiles = new HashSet<string>(_selectedFiles);
-        
-        await OnSelectionChanged.InvokeAsync(new HashSet<string>(_selectedFiles));
-    }
-
-    private void SetCheckState(FileTreeNode node, bool state)
-    {
-        node.IsChecked = state;
-        foreach (var child in node.Children)
-        {
-            SetCheckState(child, state);
-        }
-    }
-
-    private void UpdateAncestors(FileTreeNode node)
-    {
-        var parent = node.Parent;
-        while (parent != null)
-        {
-            var allChecked = parent.Children.All(c => c.IsChecked == true);
-            var allUnchecked = parent.Children.All(c => c.IsChecked == false);
-
-            if (allChecked) parent.IsChecked = true;
-            else if (allUnchecked) parent.IsChecked = false;
-            else parent.IsChecked = null;
-
-            parent = parent.Parent;
-        }
-    }
-    
-    private void CollectSelectedFiles(List<FileTreeNode> nodes)
-    {
-        foreach (var node in nodes)
-        {
-            if (node.FullPath != null && node.IsChecked == true)
-            {
-                _selectedFiles.Add(node.FullPath);
-            }
-            CollectSelectedFiles(node.Children);
-        }
-    }
-
-    private void ToggleExpand(FileTreeNode node)
-    {
-        node.IsExpanded = !node.IsExpanded;
     }
 
     public class FileTreeNode
@@ -361,8 +352,7 @@
         public string Name { get; set; } = "";
         public string? FullPath { get; set; }
         public List<FileTreeNode> Children { get; set; } = new();
-        public bool IsExpanded { get; set; } = true;
-        public bool? IsChecked { get; set; } = true;
         public FileTreeNode? Parent { get; set; }
+        public bool IsBackup { get; set; }
     }
 }

@@ -38,6 +38,17 @@ namespace ClefExplorer.Services
 
         public bool IsLoading { get; private set; }
         public IReadOnlyList<ClefEvent> Events => _events;
+
+        /// <summary>
+        /// Cópia consistente dos eventos para enumeração segura fora do lock.
+        /// Evita a race com <see cref="UpdateLoadedFiles"/>/<see cref="LoadFromPathsAsync"/>,
+        /// que mutam a lista em outra thread (enumerar a List viva durante mutação é
+        /// comportamento indefinido e pode duplicar/saltar elementos ou lançar).
+        /// </summary>
+        public ClefEvent[] Snapshot()
+        {
+            lock (_events) { return _events.ToArray(); }
+        }
         public string? FileName => _fileName;
         public string Filter { get => _filter; set { _filter = value; Changed?.Invoke(); } }
         public IReadOnlyList<string> LoadedFiles => _loadedFiles;
