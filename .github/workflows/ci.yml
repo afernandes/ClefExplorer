@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & publish (smoke)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore src/ClefExplorer.csproj
+
+      - name: Build (Release)
+        run: dotnet build src/ClefExplorer.csproj -c Release --no-restore
+
+      # Publica single-file self-contained (mesmos padrões do csproj) só para
+      # validar que a publicação funciona e gerar um artefato baixável.
+      - name: Publish single-file (win-x64)
+        run: dotnet publish src/ClefExplorer.csproj -c Release -r win-x64 --self-contained -o artifacts/win-x64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClefExplorer-win-x64
+          path: artifacts/win-x64
+          if-no-files-found: error
