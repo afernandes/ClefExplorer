@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ClefExplorer.Services;
+using Omni.Blazor;
 
 namespace ClefExplorer
 {
@@ -19,6 +20,7 @@ namespace ClefExplorer
             var services = new ServiceCollection();
             services.AddLogging(b => b.AddDebug());
             services.AddWindowsFormsBlazorWebView();
+            services.AddOmniComponents();
             services.AddSingleton<LogStore>();
             services.AddSingleton<LogGroupService>();
             services.AddSingleton<SettingsService>();

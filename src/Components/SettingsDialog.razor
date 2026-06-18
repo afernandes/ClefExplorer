@@ -1,108 +1,84 @@
 @using ClefExplorer.Services
 @inject SettingsService SettingsService
 @inject FileAssociationService FileAssociationService
+@inject DialogService Dialog
 
-@if (IsVisible)
-{
-    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Configurações</h5>
-                    <button type="button" class="btn-close" @onclick="Close"></button>
+<div>
+    <div class="clef-dialog-section">
+        <h6>Ignorar Arquivos (Padrões)</h6>
+        <p class="clef-dialog-hint">Ex: NomeArquivo.*.clef</p>
+        <div class="clef-input-row">
+            <OmniTextBox Value="@NewFilePattern" ValueChanged="@(v => NewFilePattern = v ?? "")" Placeholder="Novo padrão..." OnKeyDown="OnFilePatternKey" />
+            <OmniButton Text="Adicionar" Variant="ButtonVariant.Primary" OnClick="AddFilePattern" />
+        </div>
+        <div class="clef-tag-list">
+            @foreach (var pattern in SettingsService.Settings.IgnoredFilePatterns)
+            {
+                var p = pattern;
+                <div class="clef-tag-row" @key="p">
+                    <span class="clef-mono">@p</span>
+                    <OmniButton Icon="trash" IconOnly="true" Variant="ButtonVariant.Danger" Size="ComponentSize.Sm" OnClick="@(() => RemoveFilePattern(p))" />
                 </div>
-                <div class="modal-body">
-                    <div class="mb-4">
-                        <h6>Ignorar Arquivos (Padrões)</h6>
-                        <p class="text-muted small">Ex: NomeArquivo.*.clef</p>
-                        <div class="input-group mb-2">
-                            <input type="text" class="form-control" @bind="NewFilePattern" placeholder="Novo padrão..." @onkeyup="@(e => { if (e.Key == "Enter") AddFilePattern(); })" />
-                            <button class="btn btn-outline-primary" @onclick="AddFilePattern">Adicionar</button>
-                        </div>
-                        <ul class="list-group">
-                            @foreach (var pattern in SettingsService.Settings.IgnoredFilePatterns)
-                            {
-                                <li class="list-group-item d-flex justify-content-between align-items-center">
-                                    @pattern
-                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveFilePattern(pattern)"><i class="bi bi-trash"></i></button>
-                                </li>
-                            }
-                        </ul>
-                    </div>
-
-                    <div class="mb-4">
-                        <h6>Ignorar Linhas de Log (Contém Texto)</h6>
-                        <p class="text-muted small">Ex: HealthCheck</p>
-                        <div class="input-group mb-2">
-                            <input type="text" class="form-control" @bind="NewLogLine" placeholder="Texto a ignorar..." @onkeyup="@(e => { if (e.Key == "Enter") AddLogLine(); })" />
-                            <button class="btn btn-outline-primary" @onclick="AddLogLine">Adicionar</button>
-                        </div>
-                        <ul class="list-group">
-                            @foreach (var line in SettingsService.Settings.IgnoredLogLines)
-                            {
-                                <li class="list-group-item d-flex justify-content-between align-items-center">
-                                    @line
-                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveLogLine(line)"><i class="bi bi-trash"></i></button>
-                                </li>
-                            }
-                        </ul>
-                    </div>
-
-                    <div class="mb-4">
-                        <h6>Associação de Arquivos</h6>
-                        <p class="text-muted small">Definir este aplicativo como padrão para arquivos .clef e .clef.gz</p>
-                        @if (_isDefaultApp)
-                        {
-                            <div class="alert alert-success d-flex align-items-center py-2">
-                                <i class="bi bi-check-circle-fill me-2"></i>
-                                <div>Este aplicativo já é o padrão.</div>
-                            </div>
-                        }
-                        else
-                        {
-                            <button class="btn btn-outline-primary" @onclick="SetAsDefaultApp">Definir como padrão</button>
-                        }
-                    </div>
-
-                    <div class="text-center text-muted small mt-4">
-                        Versão @System.Reflection.Assembly.GetExecutingAssembly().GetName().Version
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" @onclick="Close">Fechar</button>
-                </div>
-            </div>
+            }
         </div>
     </div>
-}
+
+    <div class="clef-dialog-section">
+        <h6>Ignorar Linhas de Log (Contém Texto)</h6>
+        <p class="clef-dialog-hint">Ex: HealthCheck</p>
+        <div class="clef-input-row">
+            <OmniTextBox Value="@NewLogLine" ValueChanged="@(v => NewLogLine = v ?? "")" Placeholder="Texto a ignorar..." OnKeyDown="OnLogLineKey" />
+            <OmniButton Text="Adicionar" Variant="ButtonVariant.Primary" OnClick="AddLogLine" />
+        </div>
+        <div class="clef-tag-list">
+            @foreach (var line in SettingsService.Settings.IgnoredLogLines)
+            {
+                var l = line;
+                <div class="clef-tag-row" @key="l">
+                    <span class="clef-mono">@l</span>
+                    <OmniButton Icon="trash" IconOnly="true" Variant="ButtonVariant.Danger" Size="ComponentSize.Sm" OnClick="@(() => RemoveLogLine(l))" />
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="clef-dialog-section">
+        <h6>Associação de Arquivos</h6>
+        <p class="clef-dialog-hint">Definir este aplicativo como padrão para arquivos .clef e .clef.gz</p>
+        @if (_isDefaultApp)
+        {
+            <OmniAlert Severity="NotificationSeverity.Success" Icon="circle-check">Este aplicativo já é o padrão.</OmniAlert>
+        }
+        else
+        {
+            <OmniButton Text="Definir como padrão" Variant="ButtonVariant.Primary" OnClick="SetAsDefaultApp" />
+        }
+    </div>
+
+    <div style="text-align:center; color:var(--omni-fg-muted); font-size:12px; margin-top:8px;">
+        Versão @System.Reflection.Assembly.GetExecutingAssembly().GetName().Version
+    </div>
+
+    <div class="omni-row omni-row-end omni-row-gap-8" style="margin-top:12px;">
+        <OmniButton Text="Fechar" OnClick="@(() => Dialog.Close((object?)null))" />
+    </div>
+</div>
 
 @code {
-    [Parameter] public bool IsVisible { get; set; }
-    [Parameter] public EventCallback<bool> IsVisibleChanged { get; set; }
-
     private string NewFilePattern { get; set; } = "";
     private string NewLogLine { get; set; } = "";
     private bool _isDefaultApp;
 
-    protected override void OnParametersSet()
-    {
-        if (IsVisible)
-        {
-            CheckDefaultApp();
-        }
-    }
+    protected override void OnInitialized() => CheckDefaultApp();
 
     private void CheckDefaultApp()
     {
-        try
-        {
-            _isDefaultApp = FileAssociationService.IsDefaultHandler();
-        }
-        catch
-        {
-            _isDefaultApp = false;
-        }
+        try { _isDefaultApp = FileAssociationService.IsDefaultHandler(); }
+        catch { _isDefaultApp = false; }
     }
+
+    private void OnFilePatternKey(KeyboardEventArgs e) { if (e.Key == "Enter") AddFilePattern(); }
+    private void OnLogLineKey(KeyboardEventArgs e) { if (e.Key == "Enter") AddLogLine(); }
 
     private void AddFilePattern()
     {
@@ -146,11 +122,5 @@
     {
         FileAssociationService.SetAsDefault();
         CheckDefaultApp();
-    }
-
-    private async Task Close()
-    {
-        IsVisible = false;
-        await IsVisibleChanged.InvokeAsync(false);
     }
 }

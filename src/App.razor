@@ -1,1 +1,19 @@
+@inject ThemeService Theme
+
 <LogViewer />
+
+@* Hosts globais de overlay da Omni (Dialog, Notification, Tooltip, ContextMenu, Tour).
+   O OmniDialogHost é exigido pelo DialogService usado nos modais. *@
+<OmniOverlayHosts />
+
+@code {
+    /// <summary>Restaura accent/dark persistidos (localStorage) no primeiro render.</summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !Theme.IsInitialized)
+        {
+            try { await Theme.InitializeAsync(); StateHasChanged(); }
+            catch { /* nunca bloquear a UI por causa do restore de tema */ }
+        }
+    }
+}

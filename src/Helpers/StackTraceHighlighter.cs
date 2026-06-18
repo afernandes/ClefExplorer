@@ -40,10 +40,10 @@ namespace ClefExplorer.Helpers
                         var lineNumber = WebUtility.HtmlEncode(fileMatch.Groups[4].Value);
                         var suffix = WebUtility.HtmlEncode(fileMatch.Groups[5].Value);
 
-                        filePart = $"<span class=\"text-secondary\">{filePrefix}</span>" +
-                                   $"<span class=\"text-info text-decoration-underline\" title=\"{filePath}\">{System.IO.Path.GetFileName(fileMatch.Groups[2].Value)}</span>" +
-                                   $"<span class=\"text-secondary\">{linePrefix}</span>" +
-                                   $"<span class=\"text-primary fw-bold\">{lineNumber}</span>" +
+                        filePart = $"<span class=\"clef-st-dim\">{filePrefix}</span>" +
+                                   $"<span class=\"clef-st-file\" title=\"{filePath}\">{System.IO.Path.GetFileName(fileMatch.Groups[2].Value)}</span>" +
+                                   $"<span class=\"clef-st-dim\">{linePrefix}</span>" +
+                                   $"<span class=\"clef-st-line\">{lineNumber}</span>" +
                                    suffix;
                     }
 
@@ -72,10 +72,10 @@ namespace ClefExplorer.Helpers
                             method = WebUtility.HtmlEncode(fullPath);
                         }
 
-                        styledMethod = $"<span class=\"text-secondary\">{atPrefix}</span>" +
-                                       $"<span class=\"text-muted\">{nsClass}</span>" +
-                                       $"<span class=\"fw-bold text-dark\">{method}</span>" +
-                                       $"<span class=\"text-muted\">{args}</span>";
+                        styledMethod = $"<span class=\"clef-st-dim\">{atPrefix}</span>" +
+                                       $"<span class=\"clef-st-dim\">{nsClass}</span>" +
+                                       $"<span class=\"clef-st-method\">{method}</span>" +
+                                       $"<span class=\"clef-st-dim\">{args}</span>";
                     }
                     else
                     {
@@ -84,13 +84,13 @@ namespace ClefExplorer.Helpers
 
                     // 3. Check for System/Microsoft to dim
                     var isSystem = methodPart.Contains("System.") || methodPart.Contains("Microsoft.");
-                    var opacityClass = isSystem ? "opacity-75" : "";
+                    var opacityClass = isSystem ? "clef-st-system" : "";
 
                     lines[i] = $"<div class=\"{opacityClass}\">{WebUtility.HtmlEncode(indent)}{styledMethod}{filePart}</div>";
                 }
                 else if (trimmed.StartsWith("---") && trimmed.EndsWith("---"))
                 {
-                    lines[i] = $"<div class=\"text-danger small fst-italic\">{WebUtility.HtmlEncode(line)}</div>";
+                    lines[i] = $"<div class=\"clef-st-sep\">{WebUtility.HtmlEncode(line)}</div>";
                 }
                 else
                 {

@@ -1,0 +1,548 @@
+/* ============================================================================
+   ClefExplorer — estilos do app sobre o design system Omni.Blazor.
+   Usa exclusivamente tokens --omni-* (cores/linhas/raios/fontes) para herdar
+   tema claro/escuro e accent (indigo) automaticamente. Prefixo: clef-*.
+   ============================================================================ */
+
+html, body, #app {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    font-family: var(--omni-font-ui);
+    color: var(--omni-fg);
+    background: var(--omni-bg);
+    overflow: hidden;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+}
+
+/* ---- Layout raiz ---------------------------------------------------------- */
+.clef-root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    background: var(--omni-bg);
+}
+
+.clef-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.clef-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    height: 100%;
+    background: var(--omni-bg);
+}
+
+/* Garante que o conteúdo dos panes do OmniSplitter preencha a altura. */
+.clef-pane {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ---- Header --------------------------------------------------------------- */
+.clef-header-search {
+    flex: 1 1 auto;
+    display: flex;
+    justify-content: center;
+}
+
+.clef-header-search > * {
+    width: 100%;
+    max-width: 720px;
+}
+
+.clef-header-spacer {
+    flex: 1 1 auto;
+}
+
+.clef-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ---- Sidebar -------------------------------------------------------------- */
+.clef-sidebar {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    background: var(--omni-bg-elev);
+    border-right: 1px solid var(--omni-line);
+}
+
+.clef-sidebar-pad {
+    padding: 12px;
+}
+
+.clef-sidebar-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 8px 12px;
+}
+
+.clef-section-label {
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: .04em;
+    font-weight: 700;
+    color: var(--omni-fg-muted);
+    padding: 12px 8px 6px;
+}
+
+.clef-filters {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0 8px;
+}
+
+/* Botões de filtro rápido: largura total, texto alinhado à esquerda e ícone
+   colorido por tipo (igual ao visual antigo). */
+.clef-filter {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 7px 10px;
+    border: 0;
+    background: transparent;
+    color: var(--omni-fg);
+    border-radius: var(--omni-radius);
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.2;
+}
+
+.clef-filter:hover {
+    background: var(--omni-bg-sunken);
+}
+
+.clef-filter.is-active {
+    background: var(--omni-accent);
+    color: var(--omni-accent-fg);
+    font-weight: 600;
+}
+
+/* Cor do ícone por tipo de filtro. */
+.clef-filter-error .omni-icon { color: color-mix(in oklab, var(--omni-danger) 80%, var(--omni-fg)); }
+.clef-filter-warn .omni-icon { color: color-mix(in oklab, var(--omni-warn) 78%, var(--omni-fg)); }
+.clef-filter-info .omni-icon { color: color-mix(in oklab, var(--omni-info) 75%, var(--omni-fg)); }
+
+/* Quando ativo, o ícone acompanha a cor do texto sobre o accent para manter contraste. */
+.clef-filter.is-active .omni-icon { color: var(--omni-accent-fg); }
+
+.clef-period {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 8px;
+}
+
+.clef-field-label {
+    font-size: 12px;
+    color: var(--omni-fg-muted);
+    margin-bottom: 2px;
+}
+
+.clef-tree {
+    padding: 0 4px;
+}
+
+/* Popover "Abrir" deve ocupar a largura da sidebar */
+.clef-abrir-pop { display: block; width: 100%; }
+.clef-abrir-pop > .omni-popover-trigger { display: block; width: 100%; }
+
+/* Nó "Backup" da árvore (promovido para a raiz): cor de destaque reforçando que
+   são backups. Mistura danger+fg para manter contraste AA nos dois temas. */
+.clef-tree-backup { color: color-mix(in oklab, var(--omni-danger) 78%, var(--omni-fg)); }
+span.omni-tree-text.clef-tree-backup { font-weight: 600; }
+
+/* ---- Toolbar (paginação) -------------------------------------------------- */
+.clef-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--omni-line);
+    background: var(--omni-bg-elev);
+    flex: 0 0 auto;
+}
+
+.clef-toolbar-info {
+    font-size: 12px;
+    color: var(--omni-fg-muted);
+}
+
+/* ---- Lista de logs -------------------------------------------------------- */
+.clef-list {
+    height: 100%;
+    overflow-y: auto;
+    background: var(--omni-bg);
+}
+
+.clef-list-item {
+    display: flex;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--omni-line);
+    border-left: 3px solid transparent;
+    cursor: pointer;
+}
+
+.clef-list-item:hover {
+    background: var(--omni-bg-sunken);
+}
+
+.clef-list-item.is-selected {
+    background: var(--omni-accent-soft);
+    border-left-color: var(--omni-accent);
+}
+
+.clef-list-item-body {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.clef-list-item-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.clef-list-item-title {
+    font-weight: 600;
+    font-size: 13.5px;
+    color: var(--omni-fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 2px;
+}
+
+.clef-list-item-time {
+    font-size: 11.5px;
+    color: var(--omni-fg-muted);
+    white-space: nowrap;
+    font-family: var(--omni-font-mono);
+}
+
+.clef-list-item-meta {
+    font-size: 12px;
+    color: var(--omni-fg-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.clef-exception-flag {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    /* danger puro reprova AA (4.5:1) sobre fundos escuros; misturar com fg
+       adapta a luminância por tema (escurece no claro, clareia no escuro). */
+    color: color-mix(in oklab, var(--omni-danger) 75%, var(--omni-fg));
+    font-weight: 700;
+}
+
+/* Estado central (carregando / vazio) */
+.clef-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 8px;
+    color: var(--omni-fg-muted);
+    text-align: center;
+}
+
+/* ---- Painel de detalhes --------------------------------------------------- */
+.clef-detail {
+    height: 100%;
+    overflow-y: auto;
+    background: var(--omni-bg-sunken);
+    padding: 16px;
+}
+
+.clef-detail-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.clef-detail-meta {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    color: var(--omni-fg-muted);
+    font-size: 12.5px;
+}
+
+.clef-detail-meta-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.clef-detail-card {
+    margin-bottom: 16px;
+}
+
+.clef-mono {
+    font-family: var(--omni-font-mono);
+}
+
+.clef-msg {
+    font-family: var(--omni-font-mono);
+    font-size: 12.5px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--omni-fg);
+}
+
+.clef-pre {
+    font-family: var(--omni-font-mono);
+    font-size: 12.5px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+    color: var(--omni-fg);
+}
+
+.clef-scroll-box {
+    overflow: auto;
+    max-height: 400px;
+}
+
+/* ---- Tabela de propriedades (recursiva) ----------------------------------- */
+.clef-prop-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+}
+
+.clef-prop-table th {
+    text-align: left;
+    padding: 6px 8px;
+    background: var(--omni-bg-sunken);
+    border-bottom: 1px solid var(--omni-line-strong);
+    color: var(--omni-fg-muted);
+    font-weight: 600;
+}
+
+.clef-prop-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--omni-line);
+    vertical-align: top;
+    word-break: break-word;
+}
+
+.clef-prop-key {
+    font-weight: 600;
+    /* fg-soft fica ~3.6:1 (reprova AA); fg-muted é o token de rótulo legível. */
+    color: var(--omni-fg-muted);
+    width: 30%;
+}
+
+.clef-prop-nested {
+    border: 1px solid var(--omni-line);
+    border-radius: var(--omni-radius-sm);
+    overflow: hidden;
+}
+
+.clef-prop-seq {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.clef-prop-seq-item {
+    border-bottom: 1px solid var(--omni-line);
+    padding-bottom: 4px;
+}
+
+.clef-val-null {
+    color: var(--omni-fg-muted);
+    font-style: italic;
+}
+
+.clef-val-num {
+    color: color-mix(in oklab, var(--omni-info) 72%, var(--omni-fg));
+    font-family: var(--omni-font-mono);
+}
+
+.clef-val-text {
+    color: var(--omni-fg);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.clef-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+/* ---- Stack trace destacado (StackTraceHighlighter) ------------------------ */
+/* Cores cromáticas (info/accent/danger) como texto pequeno reprovam AA sobre
+   fundos escuros/claros; misturar com --omni-fg adapta a luminância por tema. */
+.clef-st-dim { color: var(--omni-fg-muted); }
+.clef-st-file { color: color-mix(in oklab, var(--omni-info) 72%, var(--omni-fg)); text-decoration: underline; }
+.clef-st-line { color: color-mix(in oklab, var(--omni-accent) 58%, var(--omni-fg)); font-weight: 700; }
+.clef-st-method { color: var(--omni-fg); font-weight: 700; }
+.clef-st-sep { color: color-mix(in oklab, var(--omni-danger) 70%, var(--omni-fg)); font-size: .8em; font-style: italic; }
+.clef-st-system { /* frames System/Microsoft: sem opacity (alpha derrubava o contraste abaixo de AA) */ }
+
+/* ---- Card de exceção -----------------------------------------------------
+   Em vez de pintar o card inteiro de vermelho saturado (baixo contraste para o
+   stack trace), seguimos o padrão do OmniAlert: superfície "soft" via mistura
+   em oklab (bg-elev + ~7% danger) + acento danger na borda esquerda e no título.
+   Assim o stack trace renderiza sobre fundo neutro e mantém o contraste das
+   cores clef-st-* em ambos os temas (claro/escuro). */
+.clef-exc-card {
+    background: color-mix(in oklab, var(--omni-danger) 7%, var(--omni-bg-elev));
+    border-color: color-mix(in oklab, var(--omni-danger) 28%, var(--omni-line));
+    border-left: 3px solid var(--omni-danger);
+}
+.clef-exc-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13.5px;
+    font-weight: 700;
+    /* mantém o vermelho de erro, mas com contraste AA nos dois temas (mix com fg). */
+    color: color-mix(in oklab, var(--omni-danger) 80%, var(--omni-fg));
+}
+
+/* ---- Diálogos (corpo do conteúdo dentro do OmniDialogHost) ---------------- */
+.clef-dialog-section { margin-bottom: 18px; }
+.clef-dialog-section h6 {
+    margin: 0 0 4px;
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--omni-fg);
+}
+.clef-dialog-hint {
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: var(--omni-fg-muted);
+}
+.clef-tag-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.clef-tag-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 6px 4px 10px;
+    border: 1px solid var(--omni-line);
+    border-radius: var(--omni-radius-sm);
+    background: var(--omni-bg-elev);
+    font-size: 12.5px;
+}
+.clef-input-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.clef-input-row > :first-child { flex: 1 1 auto; }
+
+/* Layout de 2 colunas do gerenciador de grupos */
+.clef-groups {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) 2fr;
+    gap: 16px;
+    min-height: 360px;
+}
+.clef-groups-list {
+    border-right: 1px solid var(--omni-line);
+    padding-right: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.clef-group-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: var(--omni-radius-sm);
+    cursor: pointer;
+    border: 1px solid transparent;
+}
+.clef-group-item:hover { background: var(--omni-bg-sunken); }
+.clef-group-item.is-active {
+    background: var(--omni-accent-soft);
+    /* borda indicadora precisa de 3:1; mix com fg garante em ambos os temas. */
+    border-color: color-mix(in oklab, var(--omni-accent) 70%, var(--omni-fg));
+}
+.clef-path-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+/* ---- Scrollbar custom ----------------------------------------------------- */
+.clef-list::-webkit-scrollbar,
+.clef-detail::-webkit-scrollbar,
+.clef-sidebar-scroll::-webkit-scrollbar,
+.clef-scroll-box::-webkit-scrollbar,
+.clef-path-list::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+.clef-list::-webkit-scrollbar-track,
+.clef-detail::-webkit-scrollbar-track,
+.clef-sidebar-scroll::-webkit-scrollbar-track,
+.clef-scroll-box::-webkit-scrollbar-track,
+.clef-path-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+.clef-list::-webkit-scrollbar-thumb,
+.clef-detail::-webkit-scrollbar-thumb,
+.clef-sidebar-scroll::-webkit-scrollbar-thumb,
+.clef-scroll-box::-webkit-scrollbar-thumb,
+.clef-path-list::-webkit-scrollbar-thumb {
+    background: var(--omni-line-strong);
+    border-radius: 5px;
+}
+.clef-list::-webkit-scrollbar-thumb:hover,
+.clef-detail::-webkit-scrollbar-thumb:hover,
+.clef-sidebar-scroll::-webkit-scrollbar-thumb:hover,
+.clef-scroll-box::-webkit-scrollbar-thumb:hover,
+.clef-path-list::-webkit-scrollbar-thumb:hover {
+    background: var(--omni-fg-soft);
+}

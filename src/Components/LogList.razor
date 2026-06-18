@@ -1,47 +1,42 @@
 @using ClefExplorer.Models
+@using ClefExplorer.Helpers
 
-<div class="h-100 overflow-auto custom-scrollbar">
+<div class="clef-list">
     @if (IsBusy)
     {
-        <div class="d-flex flex-column align-items-center justify-content-center h-100 text-muted">
-            <div class="spinner-border text-primary mb-2" role="status"></div>
+        <div class="clef-center">
+            <OmniSpinner Size="ComponentSize.Lg" />
             <span>Carregando logs...</span>
         </div>
     }
     else if (Eventos != null && Eventos.Any())
     {
-        <div class="list-group list-group-flush">
-            @foreach (var e in Eventos)
-            {
-                var selected = ReferenceEquals(SelectedEvent, e);
-                <div class="list-group-item list-group-item-action p-0 border-bottom @(selected ? "bg-primary-subtle" : "")" 
-                     @onclick="(() => OnSelect.InvokeAsync(e))" 
-                     style="cursor: pointer; border-left: 4px solid @(selected ? "var(--bs-primary)" : "transparent");">
-                    <div class="d-flex p-2 gap-2 align-items-start">
-                        @* <div class="pt-1 ps-1">
-                            <input class="form-check-input" type="checkbox" checked="@selected" readonly>
-                        </div> *@
-                        <div class="flex-grow-1" style="min-width: 0;">
-                            <div class="d-flex justify-content-between align-items-center mb-1">
-                                <span class="badge rounded-pill @ObterClasseBadge(e.Level)">@e.Level</span>
-                                <small class="text-muted text-nowrap ms-2" style="font-size: 0.75rem;">@e.Timestamp?.ToString("HH:mm:ss")</small>
-                            </div>
-                            <div class="fw-semibold text-truncate mb-1 text-dark" title="@e.Message" style="font-size: 0.95rem;">@e.Message</div>
-                            <div class="small text-muted text-truncate">
-                                @if(!string.IsNullOrEmpty(e.Exception)) { <span class="text-danger fw-bold me-2"><i class="bi bi-lightning-fill"></i> Exception</span> }
-                                @ObterResumoProps(e)
-                            </div>
-                        </div>
+        @foreach (var e in Eventos)
+        {
+            var ev = e;
+            var selected = ReferenceEquals(SelectedEvent, ev);
+            <div class="clef-list-item @(selected ? "is-selected" : "")" @onclick="@(() => OnSelect.InvokeAsync(ev))">
+                <div class="clef-list-item-body">
+                    <div class="clef-list-item-row">
+                        <OmniBadge Text="@ev.Level" Variant="LogLevelStyles.Variant(ev.Level)" />
+                        <span class="clef-list-item-time">@ev.Timestamp?.ToString("HH:mm:ss")</span>
+                    </div>
+                    <div class="clef-list-item-title" title="@ev.Message">@ev.Message</div>
+                    <div class="clef-list-item-meta">
+                        @if (!string.IsNullOrEmpty(ev.Exception))
+                        {
+                            <span class="clef-exception-flag"><OmniIcon Name="zap" Size="ComponentSize.Sm" /> Exception</span>
+                        }
+                        <span>@ObterResumoProps(ev)</span>
                     </div>
                 </div>
-            }
-        </div>
+            </div>
+        }
     }
     else
     {
-        <div class="d-flex flex-column align-items-center justify-content-center h-100 text-muted">
-            <i class="bi bi-inbox fs-1 mb-2 opacity-50"></i>
-            <span>Nenhum registro encontrado</span>
+        <div class="clef-center">
+            <OmniEmptyState Icon="inbox" Title="Nenhum registro encontrado" />
         </div>
     }
 </div>
@@ -52,27 +47,13 @@
     [Parameter] public ClefEvent? SelectedEvent { get; set; }
     [Parameter] public EventCallback<ClefEvent> OnSelect { get; set; }
 
-    private string ObterClasseBadge(string? level)
-    {
-        return level switch
-        {
-            "Debug" => "text-bg-secondary",
-            "Verbose" => "text-bg-light text-dark border",
-            "Error" => "text-bg-danger",
-            "Fatal" => "text-bg-dark",
-            "Information" => "text-bg-info text-white",
-            "Warning" => "text-bg-warning text-dark",
-            _ => "text-bg-secondary"
-        };
-    }
-
     private string ObterResumoProps(ClefEvent e)
     {
         if (e.Properties == null) return "";
         var props = e.Properties
             .Where(k => k.Key != "SourceContext" && k.Key != "RequestId" && k.Key != "ConnectionId" && k.Key != "ActionId" && k.Key != "ActionName")
             .Take(3)
-            .Select(k => 
+            .Select(k =>
             {
                 var val = k.Value.ToString().Trim('"');
                 return $"{k.Key}: {val}";
