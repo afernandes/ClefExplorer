@@ -57,15 +57,23 @@ jobs:
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Versão do pacote: $version"
 
-      # Carimba a <Identity Version> do manifesto (a Store exige versão crescente a cada envio).
-      - name: Stamp manifest version
+      # Carimba a identidade do pacote no manifesto (só durante o build do CI; não é commitado):
+      #  - Version: a Store exige versão crescente a cada envio (última parte = 0).
+      #  - Publisher: tem que ser o Publisher ID da Store, não o publisher de dev local.
+      #    O manifesto versionado mantém "CN=Anderson Fernandes" (combina com o cert local
+      #    para F5/sideload); aqui trocamos pelo Publisher ID da Store para o pacote ser aceito.
+      - name: Stamp manifest identity (version + Store publisher)
         shell: pwsh
         run: |
+          # Publisher ID público da Store (Partner Center > Account settings > Identifiers >
+          # "ID do editor do Windows"). Não é segredo — vai embutido em todo pacote publicado.
+          $storePublisher = 'CN=495F8198-C0F8-459B-ACA7-C4452D36B643'
           $path = 'ClefExplorer.Package/Package.appxmanifest'
           [xml]$m = Get-Content -Path $path
           $m.Package.Identity.Version = '${{ steps.ver.outputs.version }}'
+          $m.Package.Identity.Publisher = $storePublisher
           $m.Save((Resolve-Path $path).Path)
-          Write-Host "Manifesto carimbado com $($m.Package.Identity.Version)"
+          Write-Host "Identity: Name=$($m.Package.Identity.Name) Publisher=$($m.Package.Identity.Publisher) Version=$($m.Package.Identity.Version)"
 
       # Empacota em modo StoreUpload, SEM assinar (a Store re-assina; o cert local não existe no runner).
       - name: Build MSIX (StoreUpload, unsigned)
