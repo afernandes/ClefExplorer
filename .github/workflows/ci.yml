@@ -35,7 +35,7 @@ jobs:
       # Publica single-file self-contained (mesmos padrões do csproj) só para
       # validar que a publicação funciona e gerar um artefato baixável.
       - name: Publish single-file (win-x64)
-        run: dotnet publish src/ClefExplorer.csproj -c Release -r win-x64 --self-contained -o artifacts/win-x64
+        run: dotnet publish src/ClefExplorer.csproj -c Release -r win-x64 --self-contained --no-restore -o artifacts/win-x64
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
