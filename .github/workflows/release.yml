@@ -89,13 +89,14 @@ jobs:
           /p:AppxPackageSigningEnabled=false
           /p:GenerateTestArtifacts=false
 
-      - name: Locate .msixupload
+      - name: Locate upload package
         id: pkg
         shell: pwsh
         run: |
-          $f = Get-ChildItem -Path 'ClefExplorer.Package/AppPackages' -Recurse -Filter '*.msixupload' |
+          # O wapproj gera .appxupload (alguns projetos geram .msixupload) — cobre ambos.
+          $f = Get-ChildItem -Path 'ClefExplorer.Package/AppPackages' -Recurse -Include '*.appxupload','*.msixupload' |
                Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $f) { throw 'Nenhum .msixupload encontrado em ClefExplorer.Package/AppPackages.' }
+          if (-not $f) { throw 'Nenhum .appxupload/.msixupload encontrado em ClefExplorer.Package/AppPackages.' }
           "path=$($f.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Pacote: $($f.FullName)"
 
