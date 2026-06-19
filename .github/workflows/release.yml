@@ -76,6 +76,8 @@ jobs:
           Write-Host "Identity: Name=$($m.Package.Identity.Name) Publisher=$($m.Package.Identity.Publisher) Version=$($m.Package.Identity.Version)"
 
       # Empacota em modo StoreUpload, SEM assinar (a Store re-assina; o cert local não existe no runner).
+      # NÃO usar GenerateTestArtifacts=false nem AppxPackageDir: ambos suprimem os pacotes de
+      # recurso (scale-100/125/150/400), gerando um bundle incompleto que a Store recusa.
       - name: Build MSIX (StoreUpload, unsigned)
         shell: pwsh
         run: >
@@ -87,7 +89,6 @@ jobs:
           /p:AppxBundlePlatforms=x64
           /p:UapAppxPackageBuildMode=StoreUpload
           /p:AppxPackageSigningEnabled=false
-          /p:GenerateTestArtifacts=false
 
       - name: Locate upload package
         id: pkg
