@@ -94,7 +94,7 @@ Utilize a barra lateral esquerda para:
 - **Blazor Hybrid** (Interface de usuário web dentro do desktop)
 - **Microsoft.AspNetCore.Components.WebView.WindowsForms**
 - **Serilog** & **Serilog.Formatting.Compact.Reader** (Parsing de logs)
-- **Bootstrap 5** (Estilização)
+- **Omni.Blazor** (Biblioteca de componentes / design system - pacote NuGet `AndersonN.Omni.Blazor`)
 
 ## 📄 Licença
 
