@@ -48,6 +48,7 @@ namespace ClefExplorer
         {
             base.OnShown(e);
 
+
             var existentes = _initialPaths
                 .Where(p => !string.IsNullOrWhiteSpace(p) && (File.Exists(p) || Directory.Exists(p)))
                 .ToArray();
@@ -218,6 +219,17 @@ namespace ClefExplorer
             }
         }
 
+        /// <summary>
+        /// Intercepta o Esc antes do WinForms.
+        ///
+        /// <para>O Esc é uma "dialog key" do WinForms: o pipeline de teclado o consome no
+        /// <c>ProcessDialogKey</c> do controle antes de repassá-lo ao browser, então ele
+        /// nunca chega ao DOM — verificado na prática, nem um listener em <c>window</c> na
+        /// fase de captura o vê, e nem os popovers da própria Omni fecham com ele. Como
+        /// <c>ProcessCmdKey</c> roda antes na cadeia, capturamos aqui e publicamos na
+        /// <see cref="ShortcutBridge"/>, de onde o Blazor trata junto com os demais
+        /// atalhos.</para>
+        /// </summary>
         private void CoreWebView2_PermissionRequested(object? sender, CoreWebView2PermissionRequestedEventArgs e)
         {
             // Negar por padrão. O conteúdo é local e confiável hoje, mas liberar tudo

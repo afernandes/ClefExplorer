@@ -10,6 +10,7 @@
 @inject SettingsService SettingsService
 @inject DialogService Dialog
 @inject NotificationService Notifications
+@inject IJSRuntime JS
 
 <div class="clef-root">
     <LogHeader @bind-TextoPesquisa="TextoPesquisa"
@@ -342,8 +343,64 @@
     /// </summary>
     private void OnPathsLoaded() => _visibleFiles = null;
 
+    // --- Atalhos de teclado ------------------------------------------------------
+
+    private DotNetObjectReference<LogViewer>? _shortcutRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        try
+        {
+            _shortcutRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("clefShortcuts.register", _shortcutRef);
+        }
+        catch (Exception ex)
+        {
+            // Sem atalhos o app segue utilizável pelo mouse.
+            AppLog.Warning("Não foi possível registrar os atalhos de teclado", ex);
+        }
+    }
+
+    /// <summary>Recebe as ações traduzidas pelo listener de teclado (wwwroot/js/shortcuts.js).</summary>
+    [JSInvokable]
+    public async Task OnShortcut(string action)
+    {
+        switch (action)
+        {
+            case "open-file": await AbrirArquivoDialog(); break;
+            case "open-folder": await AbrirPastaDialog(); break;
+            case "export": await ExportarFiltrados(); break;
+            case "toggle-tail": AlternarAoVivo(); break;
+            case "reload": Carregar(); break;
+            case "next": MoverSelecao(1); break;
+            case "previous": MoverSelecao(-1); break;
+            default: return;
+        }
+
+        StateHasChanged();
+    }
+
+    /// <summary>Move a seleção dentro da página atual (setas ↑/↓).</summary>
+    private void MoverSelecao(int delta)
+    {
+        if (_eventos.Count == 0) return;
+
+        var atual = _selected is null ? -1 : _eventos.IndexOf(_selected);
+        // Sem seleção: ↓ começa no primeiro, ↑ no último.
+        var proximo = atual < 0
+            ? (delta > 0 ? 0 : _eventos.Count - 1)
+            : Math.Clamp(atual + delta, 0, _eventos.Count - 1);
+
+        _selected = _eventos[proximo];
+    }
+
     public void Dispose()
     {
+        _ = JS.InvokeVoidAsync("clefShortcuts.unregister");
+        _shortcutRef?.Dispose();
+
         Store.Changed -= OnStoreChanged;
         Store.PathsLoaded -= OnPathsLoaded;
         GroupService.Changed -= OnGroupsChanged;
