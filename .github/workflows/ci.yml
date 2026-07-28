@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build & publish (smoke)
+    name: Build, test & publish (smoke)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,11 +26,17 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # Restaura app + testes de uma vez. O ClefExplorer.Package (.wapproj) é
+      # ignorado com NU1503 — o CLI do dotnet não o suporta; quem o constrói é o
+      # MSBuild no release.yml.
       - name: Restore
-        run: dotnet restore src/ClefExplorer.csproj
+        run: dotnet restore ClefExplorer.sln
 
       - name: Build (Release)
         run: dotnet build src/ClefExplorer.csproj -c Release --no-restore
+
+      - name: Test
+        run: dotnet test test/ClefExplorer.Tests/ClefExplorer.Tests.csproj -c Release --no-restore
 
       # Publica single-file self-contained (mesmos padrões do csproj) só para
       # validar que a publicação funciona e gerar um artefato baixável.
