@@ -18,7 +18,6 @@ namespace ClefExplorer.Services
         private readonly SettingsService _settingsService;
         private readonly List<ClefEvent> _events = new();
         private string? _fileName;
-        private string _filter = string.Empty;
         private readonly List<string> _loadedFiles = new();
         private readonly List<string> _availableFiles = new();
 
@@ -37,7 +36,6 @@ namespace ClefExplorer.Services
         }
 
         public bool IsLoading { get; private set; }
-        public IReadOnlyList<ClefEvent> Events => _events;
 
         /// <summary>Quantidade de eventos carregados, lida sob lock.</summary>
         public int Count
@@ -56,20 +54,8 @@ namespace ClefExplorer.Services
             lock (_events) { return _events.ToArray(); }
         }
         public string? FileName => _fileName;
-        public string Filter { get => _filter; set { _filter = value; Changed?.Invoke(); } }
         public IReadOnlyList<string> LoadedFiles => _loadedFiles;
         public IReadOnlyList<string> AvailableFiles => _availableFiles;
-
-        public IReadOnlyList<ClefEvent> Filtered()
-        {
-            if (string.IsNullOrWhiteSpace(_filter)) return _events;
-            var f = _filter.Trim().ToLowerInvariant();
-            return _events.FindAll(e =>
-                (e.Message ?? string.Empty).ToLowerInvariant().Contains(f) ||
-                (e.Level ?? string.Empty).ToLowerInvariant().Contains(f) ||
-                (e.Exception ?? string.Empty).ToLowerInvariant().Contains(f)
-            );
-        }
 
         public async Task LoadFromFile(string path)
         {
@@ -257,12 +243,6 @@ namespace ClefExplorer.Services
                      }
                  }
              }
-        }
-
-        // Deprecated synchronous method, kept for compatibility if needed, but redirects to async logic if possible or just does sync work
-        public void LoadFromFolder(string folder)
-        {
-            LoadFromFolderAsync(folder).GetAwaiter().GetResult();
         }
 
         private bool IsFileIgnored(string filePath)

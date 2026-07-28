@@ -308,54 +308,22 @@
 
         try
         {
+            var criterios = new LogFilterCriteria
+            {
+                VisibleFiles = _visibleFiles,
+                QuickLevel = _filtroRapido,
+                From = _dataInicial,
+                To = _dataFinal,
+                Search = _textoPesquisa,
+            };
+
             await Task.Run(() =>
             {
                 if (token.IsCancellationRequested) return;
 
-                // Snapshot sob lock: AplicarFiltros enumera fora do lock do Store,
+                // Snapshot sob lock: a filtragem enumera fora do lock do Store,
                 // enquanto UpdateLoadedFiles pode mutar a lista em paralelo.
-                IEnumerable<ClefEvent> fonte = Store.Snapshot();
-
-                // Filtro Arquivo
-                if (_visibleFiles != null)
-                {
-                    fonte = fonte.Where(e => e.SourceFile != null && _visibleFiles.Contains(e.SourceFile));
-                }
-
-                // Filtro Rápido
-                // Parênteses obrigatórios: sem eles, "&&" liga mais forte que "||" e a
-                // expressão vira (e != null && Error) || Fatal — o teste de nulo deixaria
-                // de proteger o ramo Fatal, que é justamente onde e.Level lançaria.
-                if (_filtroRapido == "Error")
-                    fonte = fonte.Where(e => string.Equals(e.Level, "Error", StringComparison.OrdinalIgnoreCase)
-                                          || string.Equals(e.Level, "Fatal", StringComparison.OrdinalIgnoreCase));
-                else if (_filtroRapido == "Warning")
-                    fonte = fonte.Where(e => string.Equals(e.Level, "Warning", StringComparison.OrdinalIgnoreCase));
-                else if (_filtroRapido == "Information")
-                    fonte = fonte.Where(e => string.Equals(e.Level, "Information", StringComparison.OrdinalIgnoreCase));
-
-                // Filtro Data
-                if (_dataInicial.HasValue)
-                    fonte = fonte.Where(e => e.Timestamp.HasValue && e.Timestamp.Value.Date >= _dataInicial.Value.Date);
-
-                if (_dataFinal.HasValue)
-                    fonte = fonte.Where(e => e.Timestamp.HasValue && e.Timestamp.Value.Date <= _dataFinal.Value.Date);
-
-                // Pesquisa Texto
-                if (!string.IsNullOrWhiteSpace(_textoPesquisa))
-                {
-                    var b = _textoPesquisa.Trim();
-                    fonte = fonte.Where(e =>
-                        (e.Message ?? string.Empty).Contains(b, StringComparison.OrdinalIgnoreCase) ||
-                        (e.Exception ?? string.Empty).Contains(b, StringComparison.OrdinalIgnoreCase) ||
-                        (e.Properties != null && e.Properties.Any(p => p.Value.ToString().Contains(b, StringComparison.OrdinalIgnoreCase)))
-                    );
-                }
-
-                if (token.IsCancellationRequested) return;
-
-                // Materializa a lista em background
-                var result = fonte.OrderByDescending(e => e.Timestamp).ToList();
+                var result = LogFilter.Apply(Store.Snapshot(), criterios);
 
                 if (token.IsCancellationRequested) return;
 
