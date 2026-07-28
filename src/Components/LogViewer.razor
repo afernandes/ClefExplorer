@@ -53,7 +53,9 @@
                                 @bind-CurrentPage="Pagina"
                                 TotalCount="@_todosEventos.Count"
                                 PageSize="@QuantidadeRegistros"
-                                OnExport="ExportarFiltrados" />
+                                OnExport="ExportarFiltrados"
+                                TailEnabled="@Store.TailEnabled"
+                                OnToggleTail="AlternarAoVivo" />
 
                     <div class="clef-body">
                         @* Sem seleção: lista ocupa todo o espaço (sem splitter, evitando a
@@ -456,6 +458,17 @@
             _isBusy = false;
             StateHasChanged();
         }
+    }
+
+    /// <summary>Liga/desliga o acompanhamento ao vivo dos arquivos carregados.</summary>
+    private void AlternarAoVivo()
+    {
+        var ligando = !Store.TailEnabled;
+        Store.SetTailEnabled(ligando);
+
+        Notifications.Info(
+            ligando ? "Acompanhamento ao vivo ligado" : "Acompanhamento ao vivo desligado",
+            ligando ? "Novos eventos gravados nos arquivos carregados aparecerão automaticamente." : null);
     }
 
     /// <summary>

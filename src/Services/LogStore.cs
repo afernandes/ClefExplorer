@@ -4,8 +4,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using ClefExplorer.Models;
 using Serilog.Events;
@@ -273,6 +275,9 @@ namespace ClefExplorer.Services
              else
              {
                  await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                 // Guarda onde a leitura parou para o modo tail continuar daqui.
+                 RememberOffset(file, fs.Length);
+
                  using var sr = new StreamReader(fs);
                  var reader = new LogEventReader(sr);
                  while (reader.TryRead(out var logEvent))
@@ -284,6 +289,138 @@ namespace ClefExplorer.Services
                      }
                  }
              }
+        }
+
+        // --- Modo tail (acompanhar arquivos ao vivo) ---------------------------------
+
+        private readonly Dictionary<string, long> _fileOffsets = new(StringComparer.OrdinalIgnoreCase);
+        // Qualificado: System.Windows.Forms.Timer também está em escopo e exige a bomba de
+        // mensagens da UI — aqui a sondagem precisa rodar em background.
+        private System.Threading.Timer? _tailTimer;
+        private int _tailBusy; // 0 = livre, 1 = varredura em andamento
+
+        private static readonly TimeSpan TailInterval = TimeSpan.FromSeconds(1);
+
+        /// <summary>Indica se o aplicativo está acompanhando os arquivos carregados.</summary>
+        public bool TailEnabled { get; private set; }
+
+        private void RememberOffset(string file, long offset)
+        {
+            lock (_fileOffsets) { _fileOffsets[file] = offset; }
+        }
+
+        /// <summary>
+        /// Liga/desliga o acompanhamento ao vivo. Usamos sondagem periódica em vez de
+        /// <c>FileSystemWatcher</c>: o watcher perde eventos quando o buffer estoura e
+        /// depende de o escritor atualizar os metadados, o que loggers com buffer nem
+        /// sempre fazem na hora. Comparar o tamanho do arquivo é barato e previsível.
+        /// </summary>
+        public void SetTailEnabled(bool enabled)
+        {
+            if (TailEnabled == enabled) return;
+            TailEnabled = enabled;
+
+            if (enabled)
+            {
+                _tailTimer = new System.Threading.Timer(_ => _ = PollTailAsync(), null, TailInterval, TailInterval);
+            }
+            else
+            {
+                _tailTimer?.Dispose();
+                _tailTimer = null;
+            }
+
+            Changed?.Invoke();
+        }
+
+        private async Task PollTailAsync()
+        {
+            // Uma varredura por vez: se a anterior ainda roda (pasta lenta, muitos
+            // arquivos), pular este tique é melhor do que empilhar leituras.
+            if (Interlocked.Exchange(ref _tailBusy, 1) == 1) return;
+
+            try
+            {
+                if (IsLoading) return;
+
+                string[] arquivos;
+                lock (_events) { arquivos = _loadedFiles.ToArray(); }
+
+                var novos = new List<ClefEvent>();
+                foreach (var file in arquivos)
+                {
+                    // Um .gz é um arquivo fechado: não cresce, não há o que acompanhar.
+                    if (file.EndsWith(".gz", StringComparison.OrdinalIgnoreCase)) continue;
+
+                    try
+                    {
+                        novos.AddRange(await ReadNewEventsAsync(file));
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLog.Warning($"Falha ao acompanhar '{file}'", ex);
+                    }
+                }
+
+                if (novos.Count == 0) return;
+
+                lock (_events)
+                {
+                    _events.AddRange(novos);
+                    _events.Sort((a, b) => Nullable.Compare(b.Timestamp, a.Timestamp));
+                }
+
+                Changed?.Invoke();
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _tailBusy, 0);
+            }
+        }
+
+        /// <summary>
+        /// Lê apenas o que foi acrescentado ao arquivo desde a última leitura. Só consome
+        /// até a última quebra de linha: uma linha ainda sendo escrita seria JSON
+        /// incompleto e envenenaria o parser.
+        /// </summary>
+        private async Task<List<ClefEvent>> ReadNewEventsAsync(string file)
+        {
+            var resultado = new List<ClefEvent>();
+
+            long offset;
+            lock (_fileOffsets) { _fileOffsets.TryGetValue(file, out offset); }
+
+            await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+
+            // Arquivo menor que o offset = foi truncado ou rotacionado: recomeça do zero.
+            if (fs.Length < offset) offset = 0;
+            if (fs.Length == offset) return resultado;
+
+            fs.Seek(offset, SeekOrigin.Begin);
+            var buffer = new byte[fs.Length - offset];
+            var lidos = await fs.ReadAsync(buffer);
+            if (lidos <= 0) return resultado;
+
+            // '\n' não aparece no meio de uma sequência UTF-8 multibyte, então cortar aqui
+            // nunca parte um caractere.
+            var ultimaQuebra = Array.LastIndexOf(buffer, (byte)'\n', lidos - 1);
+            if (ultimaQuebra < 0) return resultado; // ainda não há uma linha completa
+
+            var texto = Encoding.UTF8.GetString(buffer, 0, ultimaQuebra + 1);
+
+            using var sr = new StringReader(texto);
+            var reader = new LogEventReader(sr);
+            while (reader.TryRead(out var logEvent))
+            {
+                var ev = MapLogEvent(logEvent, file);
+                if (!IsLogIgnored(ev))
+                {
+                    resultado.Add(ev);
+                }
+            }
+
+            RememberOffset(file, offset + ultimaQuebra + 1);
+            return resultado;
         }
 
         private bool IsFileIgnored(string filePath)
