@@ -11,7 +11,9 @@
     <!-- Single-file publish defaults (can be overridden via CLI) -->
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
-    <RuntimeIdentifiers>win-x64;win-x86</RuntimeIdentifiers>
+    <!-- Só x64: é o que o CI publica, o que o pacote da Store contém e o que o README
+         anuncia como requisito. Declarar win-x86 sugeria um suporte que não existe. -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
     <InvariantGlobalization>true</InvariantGlobalization>
     <ApplicationIcon>app.ico</ApplicationIcon>
@@ -24,9 +26,7 @@
     <PackageProjectUrl>https://github.com/afernandes/ClefExplorer</PackageProjectUrl>
     <RepositoryUrl>https://github.com/afernandes/ClefExplorer.git</RepositoryUrl>
     <PackageTags>log;serilog;clef;viewer;blazor;winforms;structured-logging</PackageTags>
-    <Version>1.0.0</Version>
-    <FileVersion>1.0.0.0</FileVersion>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <!-- Version/FileVersion/AssemblyVersion vêm do Directory.Build.props (fonte única). -->
   </PropertyGroup>
 
   <ItemGroup>

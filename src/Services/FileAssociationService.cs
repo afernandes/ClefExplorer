@@ -101,7 +101,9 @@ namespace ClefExplorer.Services
             using var key = Registry.CurrentUser.CreateSubKey($@"Software\Classes\{AppId}");
             if (key != null)
             {
-                key.SetValue(null, "Reader Log File");
+                // Mesmo rótulo declarado no Package.appxmanifest, para o tipo de arquivo
+                // aparecer igual na versão instalada e na avulsa.
+                key.SetValue(null, "Clef Log File");
                 key.SetValue("Icon", $"\"{exePath}\",0");
 
                 using var shell = key.CreateSubKey("shell");
