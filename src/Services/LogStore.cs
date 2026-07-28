@@ -39,6 +39,12 @@ namespace ClefExplorer.Services
         public bool IsLoading { get; private set; }
         public IReadOnlyList<ClefEvent> Events => _events;
 
+        /// <summary>Quantidade de eventos carregados, lida sob lock.</summary>
+        public int Count
+        {
+            get { lock (_events) { return _events.Count; } }
+        }
+
         /// <summary>
         /// Cópia consistente dos eventos para enumeração segura fora do lock.
         /// Evita a race com <see cref="UpdateLoadedFiles"/>/<see cref="LoadFromPathsAsync"/>,

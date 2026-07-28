@@ -1,6 +1,7 @@
 @using System.Threading
 @using ClefExplorer.Models
 @using ClefExplorer.Services
+@implements IDisposable
 
 @inject LogStore Store
 @inject LogGroupService GroupService
@@ -199,36 +200,55 @@
 
     protected override void OnInitialized()
     {
-        Store.Changed += () => InvokeAsync(() =>
-        {
-            // NÃO resetar _visibleFiles aqui: este evento também dispara durante
-            // UpdateLoadedFiles (ao (des)marcar arquivos na árvore), e zerar a
-            // seleção no meio da operação assíncrona faz a árvore recomputar os
-            // checkboxes a partir de um LoadedFiles intermediário, desmarcando o
-            // que o usuário acabou de marcar. O reset é feito só ao abrir algo novo.
-            if (Store.IsLoading)
-            {
-                _isBusy = true;
-                StateHasChanged();
-            }
-            else
-            {
-                AplicarFiltros();
-            }
-        });
-
-        GroupService.Changed += () => InvokeAsync(StateHasChanged);
+        // Handlers nomeados (não lambdas) para poderem ser desinscritos no Dispose:
+        // LogStore e LogGroupService são singletons, então um handler não removido
+        // mantém este componente vivo enquanto o app existir.
+        Store.Changed += OnStoreChanged;
+        GroupService.Changed += OnGroupsChanged;
 
         if (Store.IsLoading)
         {
             _isBusy = true;
         }
-        else if (Store.Events.Any())
+        else if (Store.Count > 0)
         {
             AplicarFiltros();
         }
 
         CheckDefaultApp();
+    }
+
+    private void OnStoreChanged() => _ = InvokeAsync(() =>
+    {
+        // NÃO resetar _visibleFiles aqui: este evento também dispara durante
+        // UpdateLoadedFiles (ao (des)marcar arquivos na árvore), e zerar a
+        // seleção no meio da operação assíncrona faz a árvore recomputar os
+        // checkboxes a partir de um LoadedFiles intermediário, desmarcando o
+        // que o usuário acabou de marcar. O reset é feito só ao abrir algo novo.
+        if (Store.IsLoading)
+        {
+            _isBusy = true;
+            StateHasChanged();
+        }
+        else
+        {
+            AplicarFiltros();
+        }
+    });
+
+    private void OnGroupsChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Store.Changed -= OnStoreChanged;
+        GroupService.Changed -= OnGroupsChanged;
+
+        var cts = Interlocked.Exchange(ref _filterCts, null);
+        if (cts is not null)
+        {
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }
+            cts.Dispose();
+        }
     }
 
     private void CheckDefaultApp()
@@ -262,11 +282,26 @@
         AplicarFiltros();
     }
 
-    private async void AplicarFiltros()
+    /// <summary>
+    /// Dispara a filtragem a partir de contextos síncronos (setters de propriedade e
+    /// handlers de evento). Descartar a Task é seguro porque <see cref="AplicarFiltrosAsync"/>
+    /// trata as próprias exceções — ao contrário de um <c>async void</c>, cuja exceção
+    /// escaparia para o contexto de sincronização e derrubaria a UI.
+    /// </summary>
+    private void AplicarFiltros() => _ = AplicarFiltrosAsync();
+
+    private async Task AplicarFiltrosAsync()
     {
-        _filterCts?.Cancel();
-        _filterCts = new CancellationTokenSource();
-        var token = _filterCts.Token;
+        // Cada invocação é dona do próprio CTS e o descarta no finally: cancelamos o
+        // anterior (sem descartá-lo, pois a invocação dele ainda pode estar lendo o token)
+        // e deixamos que aquela invocação faça o próprio descarte ao terminar.
+        var cts = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _filterCts, cts);
+        if (previous is not null)
+        {
+            try { previous.Cancel(); } catch (ObjectDisposedException) { }
+        }
+        var token = cts.Token;
 
         _isBusy = true;
         StateHasChanged();
@@ -288,8 +323,12 @@
                 }
 
                 // Filtro Rápido
+                // Parênteses obrigatórios: sem eles, "&&" liga mais forte que "||" e a
+                // expressão vira (e != null && Error) || Fatal — o teste de nulo deixaria
+                // de proteger o ramo Fatal, que é justamente onde e.Level lançaria.
                 if (_filtroRapido == "Error")
-                    fonte = fonte.Where(e => e != null && string.Equals(e.Level, "Error", StringComparison.OrdinalIgnoreCase) || string.Equals(e.Level, "Fatal", StringComparison.OrdinalIgnoreCase));
+                    fonte = fonte.Where(e => string.Equals(e.Level, "Error", StringComparison.OrdinalIgnoreCase)
+                                          || string.Equals(e.Level, "Fatal", StringComparison.OrdinalIgnoreCase));
                 else if (_filtroRapido == "Warning")
                     fonte = fonte.Where(e => string.Equals(e.Level, "Warning", StringComparison.OrdinalIgnoreCase));
                 else if (_filtroRapido == "Information")
@@ -331,14 +370,21 @@
 
             }, token);
         }
-        catch (TaskCanceledException)
+        catch (OperationCanceledException)
         {
-            // Ignora
+            // Filtragem substituída por outra mais recente — descarte esperado.
         }
         catch (Exception)
         {
             _isBusy = false;
             StateHasChanged();
+        }
+        finally
+        {
+            // Só limpa o campo se ainda apontar para este CTS (uma invocação mais
+            // recente pode tê-lo substituído) e então descarta o próprio.
+            Interlocked.CompareExchange(ref _filterCts, null, cts);
+            cts.Dispose();
         }
     }
 
