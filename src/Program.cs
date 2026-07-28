@@ -21,6 +21,7 @@ namespace ClefExplorer
             services.AddLogging(b => b.AddDebug());
             services.AddWindowsFormsBlazorWebView();
             services.AddOmniComponents();
+            services.AddSingleton<AppStorage>();
             services.AddSingleton<LogStore>();
             services.AddSingleton<LogGroupService>();
             services.AddSingleton<SettingsService>();

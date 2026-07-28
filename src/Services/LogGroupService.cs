@@ -1,25 +1,26 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Text.Json;
-using System.Threading.Tasks;
 using ClefExplorer.Models;
 
 namespace ClefExplorer.Services
 {
     public class LogGroupService
     {
-        private readonly string _storagePath;
+        private const string FileName = "groups.json";
+
+        private readonly AppStorage _storage;
         private List<LogGroup> _groups = new();
 
         public event Action? Changed;
 
-        public LogGroupService()
+        /// <summary>Erro na última tentativa de leitura/gravação, ou <c>null</c> se correu bem.</summary>
+        public string? LastError { get; private set; }
+
+        public LogGroupService(AppStorage storage)
         {
-            //var appFolder = AppDomain.CurrentDomain.BaseDirectory;
-            var appFolder = Directory.GetCurrentDirectory();
-            _storagePath = Path.Combine(appFolder, "groups.json");
+            _storage = storage;
             LoadGroups();
         }
 
@@ -56,17 +57,24 @@ namespace ClefExplorer.Services
 
         private void LoadGroups()
         {
-            if (File.Exists(_storagePath))
+            try
             {
-                try
-                {
-                    var json = File.ReadAllText(_storagePath);
-                    _groups = JsonSerializer.Deserialize<List<LogGroup>>(json) ?? new List<LogGroup>();
-                }
-                catch
-                {
-                    _groups = new List<LogGroup>();
-                }
+                var json = _storage.ReadText(FileName);
+                if (json is null) return;
+
+                _groups = JsonSerializer.Deserialize<List<LogGroup>>(json) ?? new List<LogGroup>();
+                LastError = null;
+            }
+            catch (Exception ex)
+            {
+                // Um groups.json inválido zerava a lista em memória e a próxima gravação
+                // apagava os grupos do usuário. Agora o arquivo vai para .corrupt e o erro
+                // fica registrado para ser exibido.
+                var quarantined = _storage.Quarantine(FileName);
+                _groups = new List<LogGroup>();
+                LastError = quarantined is null
+                    ? $"Arquivo de grupos inválido foi ignorado: {ex.Message}"
+                    : $"Arquivo de grupos inválido foi movido para {quarantined}: {ex.Message}";
             }
         }
 
@@ -75,11 +83,12 @@ namespace ClefExplorer.Services
             try
             {
                 var json = JsonSerializer.Serialize(_groups, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(_storagePath, json);
+                _storage.WriteText(FileName, json);
+                LastError = null;
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore errors for now
+                LastError = $"Não foi possível salvar os grupos: {ex.Message}";
             }
         }
     }
