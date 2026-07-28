@@ -8,25 +8,27 @@ O app está publicado na Store (product `9MVZN1HVJ230`, gratuito) e o CI está v
 
 **Legenda de esforço:** 🟢 baixo (≤ meio dia) · 🟡 médio (1–3 dias) · 🔴 alto (> 3 dias)
 
+**Status:** ✅ concluído · ⬜ pendente
+
 ---
 
 ## Lista priorizada
 
-### P0 — Crítico (afeta usuários hoje)
+### P0 — Crítico (afeta usuários hoje) — ✅ concluído
 
-| # | Item | Tipo | Esforço |
-|---|---|---|---|
-| 1 | Configurações e grupos não persistem na versão da Store (MSIX) | 🐞 Bug | 🟡 |
-| 2 | Filtro "Erros" ignora o nível Fatal por precedência de operador | 🐞 Bug | 🟢 |
-| 3 | `async void` na filtragem + `CancellationTokenSource` vazando + eventos sem `IDisposable` | 🐞 Bug | 🟢 |
+| # | Item | Tipo | Esforço | Status |
+|---|---|---|---|---|
+| 1 | Configurações e grupos não persistem na versão da Store (MSIX) | 🐞 Bug | 🟡 | ✅ |
+| 2 | Filtro "Erros" ignora o nível Fatal por precedência de operador | 🐞 Bug | 🟢 | ✅ |
+| 3 | `async void` na filtragem + `CancellationTokenSource` vazando + eventos sem `IDisposable` | 🐞 Bug | 🟢 | ✅ |
 
-### P1 — Fundação (destrava o resto com segurança)
+### P1 — Fundação (destrava o resto com segurança) — ✅ concluído
 
-| # | Item | Tipo | Esforço |
-|---|---|---|---|
-| 4 | Projeto de testes automatizados + gate no CI | 🧱 Débito | 🟡 |
-| 5 | Tratamento de erros visível ao usuário (eliminar os 15 `catch` silenciosos) | 🧱 Débito | 🟡 |
-| 6 | Encapsular o `LogStore` e remover código morto | 🧱 Débito | 🟢 |
+| # | Item | Tipo | Esforço | Status |
+|---|---|---|---|---|
+| 4 | Projeto de testes automatizados + gate no CI | 🧱 Débito | 🟡 | ✅ |
+| 5 | Tratamento de erros visível ao usuário (eliminar os 15 `catch` silenciosos) | 🧱 Débito | 🟡 | ✅ |
+| 6 | Encapsular o `LogStore` e remover código morto | 🧱 Débito | 🟢 | ✅ |
 
 ### P2 — Features essenciais
 
@@ -59,6 +61,23 @@ O app está publicado na Store (product `9MVZN1HVJ230`, gratuito) e o CI está v
 | 21 | Versionamento coerente + auto-update da versão standalone | 🧱 Débito | 🟡 |
 | 22 | Internacionalização (i18n) | ✨ Feature | 🔴 |
 | 23 | Higiene geral do código e nomenclatura | 🧱 Débito | 🟢 |
+
+---
+
+## O que já foi entregue
+
+**P0 e P1 estão concluídos** — os três bugs críticos e a fundação (testes, encapsulamento e
+tratamento de erros). Resultado:
+
+- **81 testes automatizados** (antes: zero), rodando como gate no CI.
+- Configurações e grupos agora persistem na versão da Store; arquivos antigos ao lado do
+  executável são migrados; JSON inválido vai para `.corrupt` em vez de apagar os dados.
+- Erros deixaram de ser silenciosos: notificações na UI + log próprio em
+  `%LOCALAPPDATA%\ClefExplorer\logs\`.
+- Filtragem extraída para `LogFilter` (testável), `LogStore` encapsulado, código morto removido.
+- Avisos `CS*` do build zerados (restou apenas um `MSB3277` vindo do pacote WebView2).
+
+O detalhamento abaixo permanece como registro do diagnóstico original de cada item.
 
 ---
 
