@@ -359,6 +359,158 @@ public class LogStoreTests : IDisposable
         Assert.Equal("de b", store.Snapshot()[0].Message);
     }
 
+    // --- Modo tail (acompanhar arquivos ao vivo) --------------------------------
+
+    /// <summary>Espera até a condição valer ou estourar o tempo — o tail sonda a cada 1s.</summary>
+    private static async Task<bool> WaitUntil(Func<bool> condition, int timeoutMs = 6000)
+    {
+        var limite = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < limite)
+        {
+            if (condition()) return true;
+            await Task.Delay(100);
+        }
+        return condition();
+    }
+
+    [Fact]
+    public async Task Tail_is_off_by_default()
+    {
+        Assert.False(NewStore().TailEnabled);
+    }
+
+    [Fact]
+    public async Task Tail_picks_up_lines_appended_after_the_load()
+    {
+        var file = WriteClef("app.clef", ClefLine("inicial"));
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+        Assert.Equal(1, store.Count);
+
+        store.SetTailEnabled(true);
+        try
+        {
+            File.AppendAllText(file, ClefLine("apareceu depois") + Environment.NewLine);
+
+            Assert.True(await WaitUntil(() => store.Count == 2), "o evento novo não foi captado");
+            Assert.Contains(store.Snapshot(), e => e.Message == "apareceu depois");
+        }
+        finally
+        {
+            store.SetTailEnabled(false);
+        }
+    }
+
+    [Fact]
+    public async Task Tail_does_not_reread_events_already_loaded()
+    {
+        var file = WriteClef("app.clef", ClefLine("a"), ClefLine("b"));
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+
+        store.SetTailEnabled(true);
+        try
+        {
+            File.AppendAllText(file, ClefLine("c") + Environment.NewLine);
+            await WaitUntil(() => store.Count == 3);
+            await Task.Delay(1500); // deixa passar mais alguns tiques
+
+            Assert.Equal(3, store.Count); // e não 5, 7…
+        }
+        finally
+        {
+            store.SetTailEnabled(false);
+        }
+    }
+
+    [Fact]
+    public async Task Tail_ignores_a_line_that_is_still_being_written()
+    {
+        // Uma linha sem "\n" ainda está sendo escrita: como JSON incompleto,
+        // envenenaria o parser se fosse consumida.
+        var file = WriteClef("app.clef", ClefLine("completa"));
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+
+        store.SetTailEnabled(true);
+        try
+        {
+            File.AppendAllText(file, @"{""@t"":""2026-06-15T12:00:00.00000");
+            await Task.Delay(2000);
+
+            Assert.Equal(1, store.Count);
+
+            // Ao completar a linha, o evento entra.
+            File.AppendAllText(file, @"00Z"",""@mt"":""agora sim""}" + Environment.NewLine);
+            Assert.True(await WaitUntil(() => store.Count == 2), "a linha completada não foi captada");
+        }
+        finally
+        {
+            store.SetTailEnabled(false);
+        }
+    }
+
+    [Fact]
+    public async Task Tail_restarts_from_the_beginning_when_the_file_is_truncated()
+    {
+        // Rotação de log: o arquivo encolhe e o offset antigo deixa de valer.
+        var file = WriteClef("app.clef", ClefLine("velho1"), ClefLine("velho2"), ClefLine("velho3"));
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+        Assert.Equal(3, store.Count);
+
+        store.SetTailEnabled(true);
+        try
+        {
+            File.WriteAllText(file, ClefLine("depois da rotação") + Environment.NewLine);
+
+            Assert.True(await WaitUntil(() => store.Snapshot().Any(e => e.Message == "depois da rotação")),
+                "o conteúdo pós-rotação não foi captado");
+        }
+        finally
+        {
+            store.SetTailEnabled(false);
+        }
+    }
+
+    [Fact]
+    public async Task Disabling_tail_stops_picking_up_new_lines()
+    {
+        var file = WriteClef("app.clef", ClefLine("inicial"));
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+        store.SetTailEnabled(true);
+        store.SetTailEnabled(false);
+
+        File.AppendAllText(file, ClefLine("nao deve aparecer") + Environment.NewLine);
+        await Task.Delay(2000);
+
+        Assert.Equal(1, store.Count);
+    }
+
+    [Fact]
+    public async Task Tail_respects_the_ignored_log_lines_setting()
+    {
+        var file = WriteClef("app.clef", ClefLine("inicial"));
+        var store = NewStore(out var settings);
+        settings.Settings.IgnoredLogLines.Add("ruído");
+        await store.LoadFromFolderAsync(_root);
+
+        store.SetTailEnabled(true);
+        try
+        {
+            File.AppendAllText(file, ClefLine("ruído a ignorar") + Environment.NewLine);
+            File.AppendAllText(file, ClefLine("evento relevante") + Environment.NewLine);
+
+            Assert.True(await WaitUntil(() => store.Count == 2), "o evento relevante não foi captado");
+            Assert.DoesNotContain(store.Snapshot(), e => e.Message == "ruído a ignorar");
+        }
+        finally
+        {
+            store.SetTailEnabled(false);
+        }
+    }
+
     [Fact]
     public async Task Changed_is_raised_around_a_load()
     {

@@ -52,7 +52,10 @@
                     <LogToolbar Subtitulo="@Subtitulo"
                                 @bind-CurrentPage="Pagina"
                                 TotalCount="@_todosEventos.Count"
-                                PageSize="@QuantidadeRegistros" />
+                                PageSize="@QuantidadeRegistros"
+                                OnExport="ExportarFiltrados"
+                                TailEnabled="@Store.TailEnabled"
+                                OnToggleTail="AlternarAoVivo" />
 
                     <div class="clef-body">
                         @* Sem seleção: lista ocupa todo o espaço (sem splitter, evitando a
@@ -206,6 +209,7 @@
         // LogStore e LogGroupService são singletons, então um handler não removido
         // mantém este componente vivo enquanto o app existir.
         Store.Changed += OnStoreChanged;
+        Store.PathsLoaded += OnPathsLoaded;
         GroupService.Changed += OnGroupsChanged;
 
         if (Store.IsLoading)
@@ -281,9 +285,16 @@
 
     private void OnGroupsChanged() => _ = InvokeAsync(StateHasChanged);
 
+    /// <summary>
+    /// Um conjunto novo de caminhos foi carregado (menu Abrir, arrastar e soltar, linha de
+    /// comando ou outra instância): a seleção de arquivos visíveis não vale mais.
+    /// </summary>
+    private void OnPathsLoaded() => _visibleFiles = null;
+
     public void Dispose()
     {
         Store.Changed -= OnStoreChanged;
+        Store.PathsLoaded -= OnPathsLoaded;
         GroupService.Changed -= OnGroupsChanged;
 
         var cts = Interlocked.Exchange(ref _filterCts, null);
@@ -446,6 +457,46 @@
             await Store.LoadFromPathsAsync(group.Paths);
             _isBusy = false;
             StateHasChanged();
+        }
+    }
+
+    /// <summary>Liga/desliga o acompanhamento ao vivo dos arquivos carregados.</summary>
+    private void AlternarAoVivo()
+    {
+        var ligando = !Store.TailEnabled;
+        Store.SetTailEnabled(ligando);
+
+        Notifications.Info(
+            ligando ? "Acompanhamento ao vivo ligado" : "Acompanhamento ao vivo desligado",
+            ligando ? "Novos eventos gravados nos arquivos carregados aparecerão automaticamente." : null);
+    }
+
+    /// <summary>
+    /// Exporta o conjunto FILTRADO inteiro — não apenas a página exibida, que é o que o
+    /// usuário vê mas raramente o que quer compartilhar.
+    /// </summary>
+    private async Task ExportarFiltrados()
+    {
+        if (_todosEventos.Count == 0) return;
+
+        var sugestao = $"clef-export-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
+        var destino = await FilePicker.PickSaveFileAsync(LogExporter.DialogFilter, sugestao);
+        if (destino is null) return;
+
+        try
+        {
+            var formato = LogExporter.FormatFromPath(destino);
+            var conteudo = await Task.Run(() => LogExporter.Export(_todosEventos, formato));
+            await File.WriteAllTextAsync(destino, conteudo);
+
+            Notifications.Success(
+                $"{_todosEventos.Count} eventos exportados",
+                Path.GetFileName(destino));
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"Falha ao exportar para '{destino}'", ex);
+            Notifications.Error("Não foi possível exportar", ex.Message);
         }
     }
 
