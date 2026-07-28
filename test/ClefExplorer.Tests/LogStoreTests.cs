@@ -407,6 +407,73 @@ public class LogStoreTests : IDisposable
         Assert.Equal("de b", store.Snapshot()[0].Message);
     }
 
+    // --- Cancelamento -----------------------------------------------------------
+
+    /// <summary>Gera um .clef grande o bastante para o carregamento não terminar instantaneamente.</summary>
+    private string WriteBigClef(string fileName, int lines)
+    {
+        var path = Path.Combine(_root, fileName);
+        using var writer = new StreamWriter(path);
+        for (var i = 0; i < lines; i++)
+        {
+            writer.WriteLine(ClefLine($"evento {i}"));
+        }
+        return path;
+    }
+
+    [Fact]
+    public void CancelLoad_without_a_load_in_progress_is_harmless()
+    {
+        var store = NewStore();
+
+        store.CancelLoad(); // não deve lançar
+
+        Assert.Equal(0, store.Count);
+    }
+
+    [Fact]
+    public async Task Cancelling_a_load_preserves_the_previous_content()
+    {
+        // O estado só é trocado ao final de uma leitura completa, então um
+        // carregamento abortado não pode deixar a lista pela metade.
+        WriteClef("pequeno.clef", ClefLine("conteúdo anterior"));
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+        Assert.Equal(1, store.Count);
+
+        File.Delete(Path.Combine(_root, "pequeno.clef"));
+        WriteBigClef("grande.clef", 40_000);
+
+        var carregando = store.LoadFromFolderAsync(_root);
+        store.CancelLoad();
+        await carregando;
+
+        // Ou o conteúdo anterior (cancelou a tempo) ou o novo completo — nunca um meio-termo.
+        Assert.True(store.Count == 1 || store.Count == 40_000, $"estado inconsistente: {store.Count}");
+        Assert.False(store.IsLoading);
+    }
+
+    [Fact]
+    public async Task A_new_load_supersedes_the_one_in_progress()
+    {
+        WriteBigClef("grande.clef", 30_000);
+        var store = NewStore();
+
+        var primeiro = store.LoadFromFolderAsync(_root);
+
+        var outra = Path.Combine(_root, "outra");
+        Directory.CreateDirectory(outra);
+        File.WriteAllLines(Path.Combine(outra, "novo.clef"), new[] { ClefLine("do segundo carregamento") });
+
+        var segundo = store.LoadFromPathsAsync(new[] { outra });
+        await Task.WhenAll(primeiro, segundo);
+
+        // Vence o último pedido, não o que por acaso terminar depois.
+        Assert.Equal(1, store.Count);
+        Assert.Equal("do segundo carregamento", store.Snapshot()[0].Message);
+        Assert.False(store.IsLoading);
+    }
+
     // --- Modo tail (acompanhar arquivos ao vivo) --------------------------------
 
     /// <summary>Espera até a condição valer ou estourar o tempo — o tail sonda a cada 1s.</summary>

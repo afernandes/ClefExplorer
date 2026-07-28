@@ -1,6 +1,15 @@
 <div class="clef-toolbar">
     <span class="clef-toolbar-info">@Subtitulo</span>
     <div class="clef-toolbar-actions">
+        @if (IsLoading)
+        {
+            <OmniButton Text="Cancelar"
+                        Icon="x"
+                        Size="ComponentSize.Sm"
+                        Variant="ButtonVariant.Danger"
+                        Title="Interrompe o carregamento em andamento"
+                        OnClick="OnCancelLoad" />
+        }
         <OmniButton Text="Ao vivo"
                     Icon="@(TailEnabled ? "pause" : "play")"
                     Size="ComponentSize.Sm"
@@ -31,4 +40,6 @@
     [Parameter] public EventCallback OnExport { get; set; }
     [Parameter] public bool TailEnabled { get; set; }
     [Parameter] public EventCallback OnToggleTail { get; set; }
+    [Parameter] public bool IsLoading { get; set; }
+    [Parameter] public EventCallback OnCancelLoad { get; set; }
 }

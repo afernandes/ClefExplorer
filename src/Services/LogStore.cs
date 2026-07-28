@@ -99,13 +99,40 @@ namespace ClefExplorer.Services
             await LoadFromPathsAsync(new[] { folder });
         }
 
+        /// <summary>
+        /// Cancela o carregamento em andamento, se houver. Um novo carregamento cancela o
+        /// anterior automaticamente — abrir uma pasta enorme por engano não deve prender o
+        /// usuário até o fim.
+        /// </summary>
+        public void CancelLoad()
+        {
+            var cts = Volatile.Read(ref _loadCts);
+            if (cts is null) return;
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        }
+
+        private CancellationTokenSource? _loadCts;
+
         public async Task LoadFromPathsAsync(IEnumerable<string> paths)
         {
             var pathList = paths.ToList();
+
+            // Cada carregamento é dono do próprio CTS e o descarta no finally; o anterior é
+            // apenas cancelado, pois aquela execução ainda pode estar lendo o token.
+            var cts = new CancellationTokenSource();
+            var anterior = Interlocked.Exchange(ref _loadCts, cts);
+            if (anterior is not null)
+            {
+                try { anterior.Cancel(); } catch (ObjectDisposedException) { }
+            }
+            var token = cts.Token;
+
             IsLoading = true;
             ClearFailures();
             Changed?.Invoke();
 
+            try
+            {
             await Task.Run(async () =>
             {
                 var tempEvents = new ConcurrentBag<ClefEvent>();
@@ -166,11 +193,16 @@ namespace ClefExplorer.Services
                     }
                 }
 
-                await Parallel.ForEachAsync(filesToLoad, async (file, _) =>
+                var opcoes = new ParallelOptions { CancellationToken = token };
+                await Parallel.ForEachAsync(filesToLoad, opcoes, async (file, ct) =>
                 {
                     try
                     {
-                        await ReadFileEvents(file, tempEvents);
+                        await ReadFileEvents(file, tempEvents, ct);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw; // cancelamento não é falha de leitura
                     }
                     catch (Exception ex)
                     {
@@ -179,6 +211,8 @@ namespace ClefExplorer.Services
                         RecordFailure(file, ex);
                     }
                 });
+
+                token.ThrowIfCancellationRequested();
 
                 lock (_events)
                 {
@@ -193,13 +227,27 @@ namespace ClefExplorer.Services
                     _loadedFiles.Clear();
                     _loadedFiles.AddRange(filesToLoad);
                 }
-            });
+            }, token);
 
             IsLoading = false;
             // PathsLoaded antes de Changed: assim quem escuta já limpou a seleção de
             // arquivos visíveis quando a UI for recalcular os filtros.
             PathsLoaded?.Invoke();
             Changed?.Invoke();
+            }
+            catch (OperationCanceledException)
+            {
+                // Cancelado pelo usuário ou substituído por outro carregamento: o estado
+                // anterior é preservado, pois só o trocamos ao final de uma leitura completa.
+                AppLog.Info("Carregamento cancelado.");
+                IsLoading = false;
+                Changed?.Invoke();
+            }
+            finally
+            {
+                Interlocked.CompareExchange(ref _loadCts, null, cts);
+                cts.Dispose();
+            }
         }
 
         public async Task UpdateLoadedFiles(IEnumerable<string> newSelection)
@@ -255,7 +303,7 @@ namespace ClefExplorer.Services
             Changed?.Invoke();
         }
 
-        private async Task ReadFileEvents(string file, ConcurrentBag<ClefEvent> eventsBag)
+        private async Task ReadFileEvents(string file, ConcurrentBag<ClefEvent> eventsBag, CancellationToken token = default)
         {
              if (file.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
              {
@@ -265,6 +313,10 @@ namespace ClefExplorer.Services
                  var reader = new LogEventReader(sr);
                  while (reader.TryRead(out var logEvent))
                  {
+                     // Checado por evento: um único .clef.gz pode ter centenas de milhares
+                     // de linhas, e cancelar só entre arquivos não daria resposta imediata.
+                     token.ThrowIfCancellationRequested();
+
                      var ev = MapLogEvent(logEvent, file);
                      if (!IsLogIgnored(ev))
                      {
@@ -282,6 +334,8 @@ namespace ClefExplorer.Services
                  var reader = new LogEventReader(sr);
                  while (reader.TryRead(out var logEvent))
                  {
+                     token.ThrowIfCancellationRequested();
+
                      var ev = MapLogEvent(logEvent, file);
                      if (!IsLogIgnored(ev))
                      {

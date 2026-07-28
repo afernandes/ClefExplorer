@@ -55,7 +55,9 @@
                                 PageSize="@QuantidadeRegistros"
                                 OnExport="ExportarFiltrados"
                                 TailEnabled="@Store.TailEnabled"
-                                OnToggleTail="AlternarAoVivo" />
+                                OnToggleTail="AlternarAoVivo"
+                                IsLoading="@Store.IsLoading"
+                                OnCancelLoad="CancelarCarregamento" />
 
                     <div class="clef-body">
                         @* Sem seleção: lista ocupa todo o espaço (sem splitter, evitando a
@@ -497,6 +499,13 @@
             _isBusy = false;
             StateHasChanged();
         }
+    }
+
+    /// <summary>Interrompe o carregamento em andamento, preservando o conteúdo anterior.</summary>
+    private void CancelarCarregamento()
+    {
+        Store.CancelLoad();
+        Notifications.Info("Carregamento cancelado");
     }
 
     /// <summary>Liga/desliga o acompanhamento ao vivo dos arquivos carregados.</summary>
