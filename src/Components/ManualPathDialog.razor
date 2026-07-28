@@ -1,0 +1,66 @@
+@using ClefExplorer.Services
+@inject DialogService Dialog
+
+@* Substitui o prompt() nativo do navegador: ele destoava do tema Omni, não era
+   acessível, ignorava o modo escuro e não permitia validar nem pré-visualizar a
+   expansão das variáveis de ambiente. *@
+
+<div class="clef-dialog-section">
+    <OmniTextBox Value="@_path"
+                 ValueChanged="OnPathChanged"
+                 Placeholder="%localappdata%\MinhaApp\Logs"
+                 OnKeyDown="OnKeyDown" />
+
+    @if (_erro is not null)
+    {
+        <p class="clef-dialog-hint clef-dialog-error">@_erro</p>
+    }
+
+    <p class="clef-dialog-hint">
+        Aceita um arquivo ou uma pasta. Variáveis de ambiente são expandidas
+        (ex.: <code>%localappdata%</code>, <code>%TEMP%</code>).
+    </p>
+
+    @if (_expandido.Length > 0 && _expandido != _path)
+    {
+        <p class="clef-dialog-hint">Será usado: <code>@_expandido</code></p>
+    }
+</div>
+
+<div class="clef-dialog-actions">
+    <OmniButton Text="Cancelar" Variant="ButtonVariant.Ghost" OnClick="Cancelar" />
+    <OmniButton Text="Adicionar" Variant="ButtonVariant.Primary" OnClick="Confirmar" />
+</div>
+
+@code {
+    private string _path = string.Empty;
+    private string _expandido = string.Empty;
+    private string? _erro;
+
+    private void OnPathChanged(string? value)
+    {
+        _path = value ?? string.Empty;
+        _erro = null;
+        _expandido = string.IsNullOrWhiteSpace(_path)
+            ? string.Empty
+            : Environment.ExpandEnvironmentVariables(_path);
+    }
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") Confirmar();
+    }
+
+    private void Cancelar() => Dialog.Close((object?)null);
+
+    private void Confirmar()
+    {
+        if (string.IsNullOrWhiteSpace(_path))
+        {
+            _erro = "Informe um caminho.";
+            return;
+        }
+
+        Dialog.Close(_path.Trim());
+    }
+}
