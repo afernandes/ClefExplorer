@@ -40,15 +40,15 @@ O app está publicado na Store (product `9MVZN1HVJ230`, gratuito) e o CI está v
 | 10 | Instância única + abrir múltiplos arquivos de uma vez | ✨ Feature | 🟡 | ✅ |
 | 11 | Persistir estado da janela e do layout | ✨ Feature | 🟢 | ✅ (janela; larguras dos splitters pendentes) |
 
-### P3 — Qualidade de vida e performance
+### P3 — Qualidade de vida e performance — ✅ concluído
 
 | # | Item | Tipo | Esforço | Status |
 |---|---|---|---|---|
-| 12 | Atalhos de teclado | ✨ Feature | 🟢 | ⬜ |
-| 13 | Filtros avançados (níveis faltantes, por propriedade, regex) | ✨ Feature | 🟡 | ⬜ |
-| 14 | Performance da filtragem (debounce, cache de regex, ordenação duplicada) | ⚡ Perf | 🟢 | ⬜ |
-| 15 | Cancelar carregamento em andamento | ✨ Feature | 🟢 | ⬜ |
-| 16 | Substituir o `prompt()` nativo por diálogo Omni | 🧱 Débito | 🟢 | ⬜ |
+| 12 | Atalhos de teclado | ✨ Feature | 🟢 | ✅ (Esc não é possível neste host — ver nota) |
+| 13 | Filtros avançados (níveis faltantes, por propriedade, regex) | ✨ Feature | 🟡 | ✅ (níveis + regex; por propriedade pendente) |
+| 14 | Performance da filtragem (debounce, cache de regex, ordenação duplicada) | ⚡ Perf | 🟢 | ✅ |
+| 15 | Cancelar carregamento em andamento | ✨ Feature | 🟢 | ✅ |
+| 16 | Substituir o `prompt()` nativo por diálogo Omni | 🧱 Débito | 🟢 | ✅ |
 | 17 | Endurecer permissões do WebView2 | 🔒 Segurança | 🟢 | ✅ (junto com o P2) |
 
 ### P4 — Evolução
@@ -84,7 +84,23 @@ O app está publicado na Store (product `9MVZN1HVJ230`, gratuito) e o CI está v
 - **Instância única** + abrir vários arquivos de uma vez (antes só `args[0]`).
 - Posição/tamanho da janela preservados, validados contra os monitores atuais.
 
-**Total: 121 testes.** O detalhamento abaixo permanece como registro do diagnóstico original.
+**P3 — qualidade de vida**
+- **Atalhos de teclado**: Ctrl+O/Ctrl+Shift+O (abrir), Ctrl+F (busca), Ctrl+E (exportar),
+  Ctrl+L (ao vivo), F5, ↑/↓ na lista.
+- **Filtros avançados**: seleção múltipla de níveis (Debug e Verbose ganharam botão) e busca
+  por expressão regular.
+- **Performance**: debounce na busca, ordenação redundante eliminada, regex dos padrões
+  ignorados em cache.
+- **Cancelar** carregamento em andamento, preservando o conteúdo anterior.
+- `prompt()` nativo substituído por diálogo Omni.
+
+> **Nota — Esc não é suportado como atalho.** Neste host o WebView2 consome a tecla antes de
+> qualquer ponto alcançável: não chega a um listener em `document` nem em `window` (fase de
+> captura), nem ao `ProcessCmdKey` do formulário, nem a um `IMessageFilter` da thread de UI —
+> os próprios popovers da Omni também não fecham com ela. As ações equivalentes seguem no
+> mouse.
+
+**Total: 146 testes.** O detalhamento abaixo permanece como registro do diagnóstico original.
 
 ---
 
