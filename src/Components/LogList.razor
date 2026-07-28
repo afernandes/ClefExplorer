@@ -1,7 +1,9 @@
 @using ClefExplorer.Models
 @using ClefExplorer.Helpers
 
-<div class="clef-list">
+@* role=listbox + option: os itens são <div> por causa do layout, mas precisam ser
+   anunciados como uma lista de opções selecionáveis e alcançáveis pelo teclado. *@
+<div class="clef-list" role="listbox" aria-label="Eventos de log" aria-busy="@IsBusy.ToString().ToLowerInvariant()">
     @if (IsBusy)
     {
         <div class="clef-center">
@@ -18,7 +20,12 @@
         <OmniVirtualize TItem="ClefEvent" Items="_itens" Height="null" ItemSize="76">
             <ItemContent Context="ev">
                 <div class="clef-list-item @(ReferenceEquals(SelectedEvent, ev) ? "is-selected" : "")"
-                     @onclick="@(() => OnSelect.InvokeAsync(ev))">
+                     role="option"
+                     tabindex="0"
+                     aria-selected="@ReferenceEquals(SelectedEvent, ev).ToString().ToLowerInvariant()"
+                     aria-label="@RotuloAcessivel(ev)"
+                     @onclick="@(() => OnSelect.InvokeAsync(ev))"
+                     @onkeydown="@(e => AoTeclar(e, ev))">
                     <div class="clef-list-item-body">
                         <div class="clef-list-item-row">
                             <OmniBadge Text="@ev.Level" Variant="LogLevelStyles.Variant(ev.Level)" />
@@ -59,6 +66,26 @@
 
     protected override void OnParametersSet() =>
         _itens = Eventos as ICollection<ClefEvent> ?? Eventos?.ToList() ?? (ICollection<ClefEvent>)Array.Empty<ClefEvent>();
+
+    /// <summary>Enter/Espaço ativam o item, como num botão.</summary>
+    private async Task AoTeclar(KeyboardEventArgs e, ClefEvent ev)
+    {
+        if (e.Key is "Enter" or " ")
+        {
+            await OnSelect.InvokeAsync(ev);
+        }
+    }
+
+    /// <summary>
+    /// Nome anunciado pelo leitor de tela. Sem ele, o item seria lido como um amontoado de
+    /// textos soltos — e o nível, que visualmente é um badge colorido, se perderia.
+    /// </summary>
+    private static string RotuloAcessivel(ClefEvent e)
+    {
+        var hora = e.Timestamp?.ToString("HH:mm:ss") ?? "";
+        var excecao = string.IsNullOrEmpty(e.Exception) ? "" : ", com exceção";
+        return $"{e.Level} às {hora}: {e.Message}{excecao}";
+    }
 
     private string ObterResumoProps(ClefEvent e)
     {

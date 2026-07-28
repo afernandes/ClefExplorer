@@ -11,10 +11,16 @@
         @foreach (var group in GroupService.Groups)
         {
             var g = group;
-            <div class="clef-group-item @(_editingGroup?.Id == g.Id ? "is-active" : "")" @key="g.Id" @onclick="@(() => EditGroup(g))">
+            @* <button> em vez de <div @onclick>: recebe foco, ativa por Enter/Espaço e é
+               anunciado como botão. Não há nada interativo aninhado, então a troca é segura. *@
+            <button type="button"
+                    class="clef-group-item @(_editingGroup?.Id == g.Id ? "is-active" : "")"
+                    @key="g.Id"
+                    aria-pressed="@((_editingGroup?.Id == g.Id).ToString().ToLowerInvariant())"
+                    @onclick="@(() => EditGroup(g))">
                 <span class="clef-mono" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">@g.Name</span>
                 <OmniIcon Name="chevron-right" Size="ComponentSize.Sm" />
-            </div>
+            </button>
         }
     </div>
 
