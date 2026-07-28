@@ -1,10 +1,34 @@
 <div class="clef-toolbar">
     <span class="clef-toolbar-info">@Subtitulo</span>
-    <OmniPagination CurrentPage="CurrentPage"
-                    CurrentPageChanged="CurrentPageChanged"
-                    TotalCount="TotalCount"
-                    PageSize="PageSize"
-                    Compact="true" />
+    <div class="clef-toolbar-actions">
+        @if (IsLoading)
+        {
+            <OmniButton Text="Cancelar"
+                        Icon="x"
+                        Size="ComponentSize.Sm"
+                        Variant="ButtonVariant.Danger"
+                        Title="Interrompe o carregamento em andamento"
+                        OnClick="OnCancelLoad" />
+        }
+        <OmniButton Text="Ao vivo"
+                    Icon="@(TailEnabled ? "pause" : "play")"
+                    Size="ComponentSize.Sm"
+                    Variant="@(TailEnabled ? ButtonVariant.Primary : ButtonVariant.Ghost)"
+                    Title="Acompanha os arquivos carregados e mostra os novos eventos automaticamente"
+                    OnClick="OnToggleTail" />
+        <OmniButton Text="Exportar"
+                    Icon="download"
+                    Size="ComponentSize.Sm"
+                    Variant="ButtonVariant.Ghost"
+                    Disabled="@(TotalCount == 0)"
+                    Title="Exporta os eventos filtrados (não apenas a página atual)"
+                    OnClick="OnExport" />
+        <OmniPagination CurrentPage="CurrentPage"
+                        CurrentPageChanged="CurrentPageChanged"
+                        TotalCount="TotalCount"
+                        PageSize="PageSize"
+                        Compact="true" />
+    </div>
 </div>
 
 @code {
@@ -13,4 +37,9 @@
     [Parameter] public EventCallback<int> CurrentPageChanged { get; set; }
     [Parameter] public int TotalCount { get; set; }
     [Parameter] public int PageSize { get; set; } = 50;
+    [Parameter] public EventCallback OnExport { get; set; }
+    [Parameter] public bool TailEnabled { get; set; }
+    [Parameter] public EventCallback OnToggleTail { get; set; }
+    [Parameter] public bool IsLoading { get; set; }
+    [Parameter] public EventCallback OnCancelLoad { get; set; }
 }

@@ -29,6 +29,30 @@ namespace ClefExplorer.Services
             });
         }
 
+        public async Task<string?> PickSaveFileAsync(string filter, string defaultFileName)
+        {
+            return await Task.Run(() =>
+            {
+                string? result = null;
+                var t = new Thread(() =>
+                {
+                    using var sfd = new SaveFileDialog();
+                    sfd.Filter = filter;
+                    sfd.FileName = defaultFileName;
+                    sfd.AddExtension = true;
+                    sfd.OverwritePrompt = true;
+                    if (sfd.ShowDialog() == DialogResult.OK)
+                    {
+                        result = sfd.FileName;
+                    }
+                });
+                t.SetApartmentState(ApartmentState.STA);
+                t.Start();
+                t.Join();
+                return result;
+            });
+        }
+
         public async Task<string?> PickFolderAsync()
         {
             return await Task.Run(() =>

@@ -30,46 +30,46 @@ O app está publicado na Store (product `9MVZN1HVJ230`, gratuito) e o CI está v
 | 5 | Tratamento de erros visível ao usuário (eliminar os 15 `catch` silenciosos) | 🧱 Débito | 🟡 | ✅ |
 | 6 | Encapsular o `LogStore` e remover código morto | 🧱 Débito | 🟢 | ✅ |
 
-### P2 — Features essenciais
+### P2 — Features essenciais — ✅ concluído
 
-| # | Item | Tipo | Esforço |
-|---|---|---|---|
-| 7 | Arrastar e soltar arquivos/pastas na janela | ✨ Feature | 🟢 |
-| 8 | Auto-refresh / modo "tail" de logs ao vivo | ✨ Feature | 🟡 |
-| 9 | Exportar eventos filtrados (CSV / JSON / texto) | ✨ Feature | 🟢 |
-| 10 | Instância única + abrir múltiplos arquivos de uma vez | ✨ Feature | 🟡 |
-| 11 | Persistir estado da janela e do layout | ✨ Feature | 🟢 |
+| # | Item | Tipo | Esforço | Status |
+|---|---|---|---|---|
+| 7 | Arrastar e soltar arquivos/pastas na janela | ✨ Feature | 🟢 | ✅ |
+| 8 | Auto-refresh / modo "tail" de logs ao vivo | ✨ Feature | 🟡 | ✅ |
+| 9 | Exportar eventos filtrados (CSV / JSON / texto) | ✨ Feature | 🟢 | ✅ |
+| 10 | Instância única + abrir múltiplos arquivos de uma vez | ✨ Feature | 🟡 | ✅ |
+| 11 | Persistir estado da janela e do layout | ✨ Feature | 🟢 | ✅ (janela; larguras dos splitters pendentes) |
 
-### P3 — Qualidade de vida e performance
+### P3 — Qualidade de vida e performance — ✅ concluído
 
-| # | Item | Tipo | Esforço |
-|---|---|---|---|
-| 12 | Atalhos de teclado | ✨ Feature | 🟢 |
-| 13 | Filtros avançados (níveis faltantes, por propriedade, regex) | ✨ Feature | 🟡 |
-| 14 | Performance da filtragem (debounce, cache de regex, ordenação duplicada) | ⚡ Perf | 🟢 |
-| 15 | Cancelar carregamento em andamento | ✨ Feature | 🟢 |
-| 16 | Substituir o `prompt()` nativo por diálogo Omni | 🧱 Débito | 🟢 |
-| 17 | Endurecer permissões do WebView2 | 🔒 Segurança | 🟢 |
+| # | Item | Tipo | Esforço | Status |
+|---|---|---|---|---|
+| 12 | Atalhos de teclado | ✨ Feature | 🟢 | ✅ (Esc não é possível neste host — ver nota) |
+| 13 | Filtros avançados (níveis faltantes, por propriedade, regex) | ✨ Feature | 🟡 | ✅ (níveis + regex; por propriedade pendente) |
+| 14 | Performance da filtragem (debounce, cache de regex, ordenação duplicada) | ⚡ Perf | 🟢 | ✅ |
+| 15 | Cancelar carregamento em andamento | ✨ Feature | 🟢 | ✅ |
+| 16 | Substituir o `prompt()` nativo por diálogo Omni | 🧱 Débito | 🟢 | ✅ |
+| 17 | Endurecer permissões do WebView2 | 🔒 Segurança | 🟢 | ✅ (junto com o P2) |
 
 ### P4 — Evolução
 
-| # | Item | Tipo | Esforço |
-|---|---|---|---|
-| 18 | Virtualização da lista (alternativa/complemento à paginação) | ⚡ Perf | 🟡 |
-| 19 | Painel de estatísticas / timeline | ✨ Feature | 🔴 |
-| 20 | Acessibilidade (teclado, ARIA, foco) | ♿ A11y | 🟡 |
-| 21 | Versionamento coerente + auto-update da versão standalone | 🧱 Débito | 🟡 |
-| 22 | Internacionalização (i18n) | ✨ Feature | 🔴 |
-| 23 | Higiene geral do código e nomenclatura | 🧱 Débito | 🟢 |
+| # | Item | Tipo | Esforço | Status |
+|---|---|---|---|---|
+| 18 | Virtualização da lista (alternativa/complemento à paginação) | ⚡ Perf | 🟡 | ⬜ |
+| 19 | Painel de estatísticas / timeline | ✨ Feature | 🔴 | ⬜ |
+| 20 | Acessibilidade (teclado, ARIA, foco) | ♿ A11y | 🟡 | ⬜ |
+| 21 | Versionamento coerente + auto-update da versão standalone | 🧱 Débito | 🟡 | ⬜ |
+| 22 | Internacionalização (i18n) | ✨ Feature | 🔴 | ⬜ |
+| 23 | Higiene geral do código e nomenclatura | 🧱 Débito | 🟢 | 🟨 parcial (avisos `CS*` zerados) |
 
 ---
 
 ## O que já foi entregue
 
-**P0 e P1 estão concluídos** — os três bugs críticos e a fundação (testes, encapsulamento e
-tratamento de erros). Resultado:
+**P0, P1 e P2 estão concluídos** — os bugs críticos, a fundação e as features essenciais.
 
-- **81 testes automatizados** (antes: zero), rodando como gate no CI.
+**P0/P1 — bugs e fundação**
+- **Testes automatizados** onde antes havia zero, rodando como gate no CI.
 - Configurações e grupos agora persistem na versão da Store; arquivos antigos ao lado do
   executável são migrados; JSON inválido vai para `.corrupt` em vez de apagar os dados.
 - Erros deixaram de ser silenciosos: notificações na UI + log próprio em
@@ -77,7 +77,30 @@ tratamento de erros). Resultado:
 - Filtragem extraída para `LogFilter` (testável), `LogStore` encapsulado, código morto removido.
 - Avisos `CS*` do build zerados (restou apenas um `MSB3277` vindo do pacote WebView2).
 
-O detalhamento abaixo permanece como registro do diagnóstico original de cada item.
+**P2 — features essenciais**
+- Arrastar e soltar arquivos/pastas na janela (exigiu desligar o `AllowExternalDrop` do WebView2).
+- Modo **"Ao vivo"**: sonda os arquivos carregados e lê só o que foi acrescentado.
+- **Exportar** o conjunto filtrado em CSV, CLEF ou texto.
+- **Instância única** + abrir vários arquivos de uma vez (antes só `args[0]`).
+- Posição/tamanho da janela preservados, validados contra os monitores atuais.
+
+**P3 — qualidade de vida**
+- **Atalhos de teclado**: Ctrl+O/Ctrl+Shift+O (abrir), Ctrl+F (busca), Ctrl+E (exportar),
+  Ctrl+L (ao vivo), F5, ↑/↓ na lista.
+- **Filtros avançados**: seleção múltipla de níveis (Debug e Verbose ganharam botão) e busca
+  por expressão regular.
+- **Performance**: debounce na busca, ordenação redundante eliminada, regex dos padrões
+  ignorados em cache.
+- **Cancelar** carregamento em andamento, preservando o conteúdo anterior.
+- `prompt()` nativo substituído por diálogo Omni.
+
+> **Nota — Esc não é suportado como atalho.** Neste host o WebView2 consome a tecla antes de
+> qualquer ponto alcançável: não chega a um listener em `document` nem em `window` (fase de
+> captura), nem ao `ProcessCmdKey` do formulário, nem a um `IMessageFilter` da thread de UI —
+> os próprios popovers da Omni também não fecham com ela. As ações equivalentes seguem no
+> mouse.
+
+**Total: 146 testes.** O detalhamento abaixo permanece como registro do diagnóstico original.
 
 ---
 

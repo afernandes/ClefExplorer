@@ -23,24 +23,29 @@ public class LogFilterTests
             Timestamp = timestamp ?? new DateTimeOffset(2026, 6, 15, 12, 0, 0, TimeSpan.Zero),
         };
 
+    private static HashSet<string> Levels(params string[] levels) =>
+        new(levels, StringComparer.OrdinalIgnoreCase);
+
     private static LogFilterCriteria Criteria(
-        string quick = LogFilter.QuickAll,
+        HashSet<string>? levels = null,
         HashSet<string>? files = null,
         DateTime? from = null,
         DateTime? to = null,
-        string? search = null) => new()
+        string? search = null,
+        bool useRegex = false) => new()
         {
-            QuickLevel = quick,
+            Levels = levels,
             VisibleFiles = files,
             From = from,
             To = to,
             Search = search,
+            UseRegex = useRegex,
         };
 
-    // --- Filtro rápido por nível ------------------------------------------------
+    // --- Filtro por nível -------------------------------------------------------
 
     [Fact]
-    public void Quick_error_includes_both_Error_and_Fatal()
+    public void The_error_group_includes_both_Error_and_Fatal()
     {
         // Regressão: a expressão original era "e != null && Error || Fatal", que por
         // precedência de operador vira "(e != null && Error) || Fatal".
@@ -52,7 +57,7 @@ public class LogFilterTests
             Event("Information", "ok"),
         };
 
-        var result = LogFilter.Apply(eventos, Criteria(LogFilter.QuickError));
+        var result = LogFilter.Apply(eventos, Criteria(Levels("Error", "Fatal")));
 
         Assert.Equal(2, result.Count);
         Assert.Contains(result, e => e.Level == "Error");
@@ -60,26 +65,39 @@ public class LogFilterTests
     }
 
     [Theory]
-    [InlineData(LogFilter.QuickWarning, "Warning")]
-    [InlineData(LogFilter.QuickInformation, "Information")]
-    public void Quick_level_filters_to_that_level_only(string quick, string expected)
-    {
-        var eventos = new[] { Event("Error"), Event("Warning"), Event("Information"), Event("Debug") };
-
-        var result = LogFilter.Apply(eventos, Criteria(quick));
-
-        Assert.All(result, e => Assert.Equal(expected, e.Level));
-        Assert.Single(result);
-    }
-
-    [Fact]
-    public void Quick_all_keeps_every_level()
+    [InlineData("Warning")]
+    [InlineData("Information")]
+    [InlineData("Debug")]    // antes não tinha como ser selecionado
+    [InlineData("Verbose")]  // idem
+    public void A_single_level_filters_to_that_level_only(string level)
     {
         var eventos = new[] { Event("Error"), Event("Warning"), Event("Information"), Event("Debug"), Event("Verbose") };
 
-        var result = LogFilter.Apply(eventos, Criteria());
+        var result = LogFilter.Apply(eventos, Criteria(Levels(level)));
 
-        Assert.Equal(5, result.Count);
+        Assert.Single(result);
+        Assert.Equal(level, result[0].Level);
+    }
+
+    [Fact]
+    public void Levels_can_be_combined()
+    {
+        // O grande ganho da seleção múltipla: ver erros e avisos juntos.
+        var eventos = new[] { Event("Error"), Event("Warning"), Event("Information"), Event("Debug") };
+
+        var result = LogFilter.Apply(eventos, Criteria(Levels("Error", "Warning")));
+
+        Assert.Equal(2, result.Count);
+        Assert.DoesNotContain(result, e => e.Level == "Information");
+    }
+
+    [Fact]
+    public void No_level_selected_keeps_every_level()
+    {
+        var eventos = new[] { Event("Error"), Event("Warning"), Event("Information"), Event("Debug"), Event("Verbose") };
+
+        Assert.Equal(5, LogFilter.Apply(eventos, Criteria()).Count);
+        Assert.Equal(5, LogFilter.Apply(eventos, Criteria(Levels())).Count);
     }
 
     [Fact]
@@ -87,9 +105,85 @@ public class LogFilterTests
     {
         var eventos = new[] { Event("error"), Event("FATAL") };
 
-        var result = LogFilter.Apply(eventos, Criteria(LogFilter.QuickError));
+        var result = LogFilter.Apply(eventos, Criteria(Levels("Error", "Fatal")));
 
         Assert.Equal(2, result.Count);
+    }
+
+    [Fact]
+    public void AllLevels_lists_every_serilog_level()
+    {
+        Assert.Equal(
+            new[] { "Fatal", "Error", "Warning", "Information", "Debug", "Verbose" },
+            LogFilter.AllLevels);
+    }
+
+    // --- Busca com expressão regular ---------------------------------------------
+
+    [Fact]
+    public void Regex_search_matches_by_pattern()
+    {
+        var eventos = new[]
+        {
+            Event(message: "pedido 12345 aprovado"),
+            Event(message: "pedido ABC rejeitado"),
+        };
+
+        var result = LogFilter.Apply(eventos, Criteria(search: @"pedido \d+", useRegex: true));
+
+        Assert.Single(result);
+        Assert.Contains("12345", result[0].Message);
+    }
+
+    [Fact]
+    public void Regex_search_is_case_insensitive()
+    {
+        var eventos = new[] { Event(message: "TIMEOUT na chamada") };
+
+        Assert.Single(LogFilter.Apply(eventos, Criteria(search: "^timeout", useRegex: true)));
+    }
+
+    [Fact]
+    public void Regex_search_also_covers_the_exception()
+    {
+        var eventos = new[] { Event(message: "falhou", exception: "System.TimeoutException: ...") };
+
+        Assert.Single(LogFilter.Apply(eventos, Criteria(search: @"\w+Exception", useRegex: true)));
+    }
+
+    [Fact]
+    public void An_invalid_regex_yields_no_results_instead_of_throwing()
+    {
+        // Enquanto se digita, o padrão passa por estados inválidos ("(", "[a-"). Lançar
+        // a cada tecla seria inutilizável.
+        var eventos = new[] { Event(message: "qualquer coisa") };
+
+        var result = LogFilter.Apply(eventos, Criteria(search: "(sem fechar", useRegex: true));
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void Without_the_regex_flag_the_term_is_literal()
+    {
+        var eventos = new[] { Event(message: "custo: R$ 5.00"), Event(message: "custo: R$ 5X00") };
+
+        // O '.' literal não pode casar com o 'X'.
+        var result = LogFilter.Apply(eventos, Criteria(search: "5.00"));
+
+        Assert.Single(result);
+        Assert.Contains("5.00", result[0].Message);
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("", true)]
+    [InlineData(@"\d+", true)]
+    [InlineData("(", false)]
+    [InlineData("[a-", false)]
+    public void IsValidRegex_reports_whether_the_pattern_compiles(string? pattern, bool expected)
+    {
+        Assert.Equal(expected, LogFilter.IsValidRegex(pattern));
     }
 
     // --- Filtro por arquivo -----------------------------------------------------
@@ -215,7 +309,7 @@ public class LogFilterTests
         };
 
         var result = LogFilter.Apply(eventos, Criteria(
-            quick: LogFilter.QuickError,
+            levels: Levels("Error", "Fatal"),
             files: new HashSet<string> { @"C:\logs\a.clef" },
             from: new DateTime(2026, 6, 15),
             search: "falha de rede"));
@@ -225,9 +319,38 @@ public class LogFilterTests
     }
 
     [Fact]
+    public void InputAlreadySorted_preserves_the_input_order()
+    {
+        // Otimização: os filtros do LINQ preservam a ordem relativa, então quando a
+        // entrada já vem ordenada (como a do LogStore) a reordenação é desperdício.
+        var a = Event(message: "primeiro", timestamp: new DateTimeOffset(2026, 6, 20, 0, 0, 0, TimeSpan.Zero));
+        var b = Event(message: "segundo", timestamp: new DateTimeOffset(2026, 6, 10, 0, 0, 0, TimeSpan.Zero));
+        var c = Event(message: "terceiro", timestamp: new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero));
+
+        var result = LogFilter.Apply(new[] { a, b, c }, new LogFilterCriteria { InputAlreadySorted = true });
+
+        Assert.Equal(new[] { "primeiro", "segundo", "terceiro" }, result.Select(e => e.Message));
+    }
+
+    [Fact]
+    public void InputAlreadySorted_still_applies_every_filter()
+    {
+        var eventos = new[] { Event("Error", "manter"), Event("Information", "descartar") };
+
+        var result = LogFilter.Apply(eventos, new LogFilterCriteria
+        {
+            Levels = Levels("Error", "Fatal"),
+            InputAlreadySorted = true,
+        });
+
+        Assert.Single(result);
+        Assert.Equal("manter", result[0].Message);
+    }
+
+    [Fact]
     public void Empty_source_returns_empty()
     {
-        var result = LogFilter.Apply(Array.Empty<ClefEvent>(), Criteria(LogFilter.QuickError));
+        var result = LogFilter.Apply(Array.Empty<ClefEvent>(), Criteria(Levels("Error", "Fatal")));
 
         Assert.Empty(result);
     }

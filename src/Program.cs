@@ -10,8 +10,20 @@ namespace ClefExplorer
         [STAThread]
         static void Main(string[] args)
         {
-            Environment.SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--autoplay-policy=no-user-gesture-required");
             Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", Path.GetTempPath() + @"ClefExplorer");
+
+            // Uma segunda instância apenas entrega seus caminhos à janela já aberta e sai.
+            // Antes, selecionar N arquivos no Explorer abria N janelas.
+            //
+            // Só encerramos se a entrega der certo: se o pipe estiver indisponível (a outra
+            // instância travou, ou o mutex ficou órfão), sair sem abrir nada deixaria o
+            // usuário sem conseguir usar o aplicativo. Nesse caso seguimos como instância
+            // independente — mesma escolha feita quando o próprio mutex falha.
+            if (!SingleInstance.TryAcquire(out var singleInstance)
+                && SingleInstance.SendToExistingInstance(args))
+            {
+                return;
+            }
 
             FixCurrentPath();
 
@@ -22,6 +34,7 @@ namespace ClefExplorer
             services.AddWindowsFormsBlazorWebView();
             services.AddOmniComponents();
             services.AddSingleton<AppStorage>();
+            services.AddSingleton<WindowPlacementService>();
             services.AddSingleton<LogStore>();
             services.AddSingleton<LogGroupService>();
             services.AddSingleton<SettingsService>();
@@ -34,8 +47,14 @@ namespace ClefExplorer
 
             var serviceProvider = services.BuildServiceProvider();
 
-            string? initialFile = args.Length > 0 ? args[0] : null;
-            Application.Run(new MainForm(serviceProvider, initialFile));
+            // Todos os argumentos, não só o primeiro: abrir vários .clef de uma vez
+            // carrega todos na mesma janela.
+            using (singleInstance)
+            {
+                var form = new MainForm(serviceProvider, args);
+                singleInstance?.StartListening(form.ReceivePathsFromOtherInstance);
+                Application.Run(form);
+            }
         }
 
         private static void FixCurrentPath()

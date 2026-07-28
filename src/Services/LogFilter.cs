@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using ClefExplorer.Models;
 
 namespace ClefExplorer.Services
@@ -11,8 +12,13 @@ namespace ClefExplorer.Services
         /// <summary>Quando definido, só eventos cujo <see cref="ClefEvent.SourceFile"/> estiver no conjunto.</summary>
         public HashSet<string>? VisibleFiles { get; init; }
 
-        /// <summary>Filtro rápido por nível: <see cref="LogFilter.QuickAll"/>, <c>Error</c>, <c>Warning</c> ou <c>Information</c>.</summary>
-        public string QuickLevel { get; init; } = LogFilter.QuickAll;
+        /// <summary>
+        /// Níveis aceitos (nomes do Serilog). <c>null</c> ou vazio = todos os níveis.
+        /// É um conjunto, e não um nível único, para permitir combinações como
+        /// "Error + Warning" e para dar acesso a Debug e Verbose, que antes não tinham
+        /// como ser selecionados.
+        /// </summary>
+        public HashSet<string>? Levels { get; init; }
 
         /// <summary>Data inicial (comparada por dia, inclusiva).</summary>
         public DateTime? From { get; init; }
@@ -22,6 +28,17 @@ namespace ClefExplorer.Services
 
         /// <summary>Busca textual em mensagem, exceção e valores das propriedades.</summary>
         public string? Search { get; init; }
+
+        /// <summary>Interpreta <see cref="Search"/> como expressão regular.</summary>
+        public bool UseRegex { get; init; }
+
+        /// <summary>
+        /// Quando a entrada já vem do mais recente para o mais antigo, dispensa a ordenação
+        /// final — os filtros do LINQ preservam a ordem relativa. O <c>LogStore</c> mantém
+        /// os eventos ordenados, então a UI liga isto e evita um O(n log n) por tecla
+        /// digitada. Padrão <c>false</c>: quem não garante a ordem continua seguro.
+        /// </summary>
+        public bool InputAlreadySorted { get; init; }
     }
 
     /// <summary>
@@ -31,10 +48,24 @@ namespace ClefExplorer.Services
     /// </summary>
     public static class LogFilter
     {
-        public const string QuickAll = "Todos";
-        public const string QuickError = "Error";
-        public const string QuickWarning = "Warning";
-        public const string QuickInformation = "Information";
+        /// <summary>Níveis do Serilog, do mais grave ao mais verboso.</summary>
+        public static readonly string[] AllLevels =
+            { "Fatal", "Error", "Warning", "Information", "Debug", "Verbose" };
+
+        /// <summary>Diz se o texto é uma expressão regular válida (para avisar antes de filtrar).</summary>
+        public static bool IsValidRegex(string? pattern)
+        {
+            if (string.IsNullOrWhiteSpace(pattern)) return true;
+            try
+            {
+                _ = new Regex(pattern);
+                return true;
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+        }
 
         /// <summary>Aplica os critérios e devolve os eventos do mais recente para o mais antigo.</summary>
         public static List<ClefEvent> Apply(IEnumerable<ClefEvent> source, LogFilterCriteria criteria)
@@ -49,15 +80,10 @@ namespace ClefExplorer.Services
                 query = query.Where(e => e.SourceFile != null && visible.Contains(e.SourceFile));
             }
 
-            query = criteria.QuickLevel switch
+            if (criteria.Levels is { Count: > 0 } levels)
             {
-                // "Erros" inclui Fatal. Os parênteses importam: sem eles, "&&" ligaria mais
-                // forte que "||" e o teste deixaria de cobrir o que se pretendia.
-                QuickError => query.Where(e => IsLevel(e, "Error") || IsLevel(e, "Fatal")),
-                QuickWarning => query.Where(e => IsLevel(e, "Warning")),
-                QuickInformation => query.Where(e => IsLevel(e, "Information")),
-                _ => query,
-            };
+                query = query.Where(e => e.Level != null && levels.Contains(e.Level));
+            }
 
             if (criteria.From is { } from)
             {
@@ -71,20 +97,43 @@ namespace ClefExplorer.Services
 
             if (!string.IsNullOrWhiteSpace(criteria.Search))
             {
-                var term = criteria.Search.Trim();
-                query = query.Where(e => Matches(e, term));
+                var matcher = BuildMatcher(criteria);
+                // Regex inválida: nenhum resultado, em vez de lançar. A UI avisa que o
+                // padrão está incompleto — filtrar enquanto se digita produziria erro a
+                // cada tecla.
+                query = matcher is null ? Enumerable.Empty<ClefEvent>() : query.Where(matcher);
             }
 
-            return query.OrderByDescending(e => e.Timestamp).ToList();
+            return criteria.InputAlreadySorted
+                ? query.ToList()
+                : query.OrderByDescending(e => e.Timestamp).ToList();
         }
 
-        private static bool IsLevel(ClefEvent e, string level) =>
-            string.Equals(e.Level, level, StringComparison.OrdinalIgnoreCase);
+        /// <summary>Devolve o predicado de busca, ou <c>null</c> se a regex for inválida.</summary>
+        private static Func<ClefEvent, bool>? BuildMatcher(LogFilterCriteria criteria)
+        {
+            var term = criteria.Search!.Trim();
 
-        private static bool Matches(ClefEvent e, string term) =>
-            (e.Message ?? string.Empty).Contains(term, StringComparison.OrdinalIgnoreCase)
-            || (e.Exception ?? string.Empty).Contains(term, StringComparison.OrdinalIgnoreCase)
-            || (e.Properties != null && e.Properties.Any(p =>
-                   p.Value.ToString().Contains(term, StringComparison.OrdinalIgnoreCase)));
+            if (!criteria.UseRegex)
+            {
+                return e => Contains(e, texto => texto.Contains(term, StringComparison.OrdinalIgnoreCase));
+            }
+
+            try
+            {
+                var regex = new Regex(term, RegexOptions.IgnoreCase);
+                return e => Contains(e, regex.IsMatch);
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>Roda o predicado sobre mensagem, exceção e valores das propriedades.</summary>
+        private static bool Contains(ClefEvent e, Func<string, bool> predicate) =>
+            predicate(e.Message ?? string.Empty)
+            || predicate(e.Exception ?? string.Empty)
+            || (e.Properties != null && e.Properties.Any(p => predicate(p.Value.ToString())));
     }
 }

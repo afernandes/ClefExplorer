@@ -3,7 +3,6 @@
 
 @inject LogGroupService GroupService
 @inject IFilePickerService FilePicker
-@inject IJSRuntime JSRuntime
 @inject DialogService Dialog
 
 <div class="clef-groups">
@@ -128,7 +127,10 @@
     {
         if (_editingGroup == null) return;
 
-        var path = await JSRuntime.InvokeAsync<string>("prompt", "Digite o caminho completo ou com variáveis de ambiente (ex: %localappdata%\\MyApp\\Logs):");
+        var path = await Dialog.OpenAsync<ManualPathDialog>(
+            "Adicionar caminho manual",
+            null,
+            new DialogOptions { Width = "560px" }) as string;
 
         if (!string.IsNullOrWhiteSpace(path) && !_editingGroup.Paths.Contains(path))
         {

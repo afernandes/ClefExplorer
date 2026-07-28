@@ -6,7 +6,15 @@
                      ValueChanged="OnSearchChanged"
                      LeadingIcon="search"
                      Clearable="true"
-                     Placeholder="Pesquisar nos logs (mensagem, correlação, exceção)..." />
+                     Placeholder="@(UsarRegex ? "Expressão regular..." : "Pesquisar nos logs (mensagem, correlação, exceção)...")" />
+
+        @* Alterna entre busca literal e expressão regular. ".*" é a convenção
+           usada por editores e navegadores para esse botão. *@
+        <button type="button"
+                class="clef-regex-toggle @(UsarRegex ? "is-active" : "") @(RegexInvalida ? "is-invalid" : "")"
+                title="@(RegexInvalida ? "Expressão regular inválida" : "Usar expressão regular")"
+                aria-pressed="@UsarRegex.ToString().ToLowerInvariant()"
+                @onclick="ToggleRegex">.*</button>
     </div>
 
     <div class="clef-header-actions">
@@ -26,6 +34,12 @@
     [Parameter] public int QuantidadeRegistros { get; set; }
     [Parameter] public EventCallback<int> QuantidadeRegistrosChanged { get; set; }
 
+    [Parameter] public bool UsarRegex { get; set; }
+    [Parameter] public EventCallback<bool> UsarRegexChanged { get; set; }
+
+    /// <summary>Sinaliza no botão que o padrão digitado ainda não compila.</summary>
+    [Parameter] public bool RegexInvalida { get; set; }
+
     [Parameter] public EventCallback OnReload { get; set; }
 
     private readonly int[] _qtdOptions = { 30, 50, 100 };
@@ -36,6 +50,12 @@
     {
         TextoPesquisa = v ?? string.Empty;
         await TextoPesquisaChanged.InvokeAsync(TextoPesquisa);
+    }
+
+    private async Task ToggleRegex()
+    {
+        UsarRegex = !UsarRegex;
+        await UsarRegexChanged.InvokeAsync(UsarRegex);
     }
 
     private async Task OnQtdChanged(int v)

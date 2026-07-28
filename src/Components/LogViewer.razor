@@ -10,10 +10,13 @@
 @inject SettingsService SettingsService
 @inject DialogService Dialog
 @inject NotificationService Notifications
+@inject IJSRuntime JS
 
 <div class="clef-root">
     <LogHeader @bind-TextoPesquisa="TextoPesquisa"
                @bind-QuantidadeRegistros="QuantidadeRegistros"
+               @bind-UsarRegex="UsarRegex"
+               RegexInvalida="@RegexInvalida"
                OnReload="Carregar" />
 
     @if (_showDefaultAppNotification)
@@ -32,7 +35,7 @@
         <OmniSplitter Orientation="Orientation.Horizontal" Variant="SplitterVariant.Line">
             <OmniSplitterPane Size="260px" Min="200px" Max="600px">
                 <div class="clef-pane">
-                    <LogSidebar @bind-FiltroRapido="FiltroRapido"
+                    <LogSidebar @bind-NiveisSelecionados="NiveisSelecionados"
                                 @bind-VisibleFiles="VisibleFiles"
                                 @bind-DataInicial="DataInicial"
                                 @bind-DataFinal="DataFinal"
@@ -52,7 +55,12 @@
                     <LogToolbar Subtitulo="@Subtitulo"
                                 @bind-CurrentPage="Pagina"
                                 TotalCount="@_todosEventos.Count"
-                                PageSize="@QuantidadeRegistros" />
+                                PageSize="@QuantidadeRegistros"
+                                OnExport="ExportarFiltrados"
+                                TailEnabled="@Store.TailEnabled"
+                                OnToggleTail="AlternarAoVivo"
+                                IsLoading="@Store.IsLoading"
+                                OnCancelLoad="CancelarCarregamento" />
 
                     <div class="clef-body">
                         @* Sem seleção: lista ocupa todo o espaço (sem splitter, evitando a
@@ -101,7 +109,8 @@
     private int _quantidadeRegistros = 50;
     private int _pagina = 1;
     private string _textoPesquisa = string.Empty;
-    private string _filtroRapido = "Todos";
+    private HashSet<string> _niveisSelecionados = new(StringComparer.OrdinalIgnoreCase);
+    private bool _usarRegex;
     private HashSet<string>? _visibleFiles;
     private DateTime? _dataInicial;
     private DateTime? _dataFinal;
@@ -140,20 +149,66 @@
         set
         {
             _textoPesquisa = value;
+            // Debounce: sem ele, cada tecla varria todos os eventos. A filtragem anterior
+            // até era cancelada, mas o agendamento e a re-renderização continuavam custando.
+            AgendarFiltragem();
+        }
+    }
+
+    private CancellationTokenSource? _debounceCts;
+    private static readonly TimeSpan DebounceBusca = TimeSpan.FromMilliseconds(250);
+
+    private void AgendarFiltragem()
+    {
+        var cts = new CancellationTokenSource();
+        var anterior = Interlocked.Exchange(ref _debounceCts, cts);
+        if (anterior is not null)
+        {
+            try { anterior.Cancel(); } catch (ObjectDisposedException) { }
+            anterior.Dispose();
+        }
+
+        _ = EsperarEFiltrar(cts);
+    }
+
+    private async Task EsperarEFiltrar(CancellationTokenSource cts)
+    {
+        try
+        {
+            await Task.Delay(DebounceBusca, cts.Token);
+            await AplicarFiltrosAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // Outra tecla chegou antes do prazo: esta filtragem foi descartada.
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _debounceCts, null, cts);
+            cts.Dispose();
+        }
+    }
+
+    private bool UsarRegex
+    {
+        get => _usarRegex;
+        set
+        {
+            _usarRegex = value;
             AplicarFiltros();
         }
     }
 
-    private string FiltroRapido
+    /// <summary>Padrão digitado ainda não compila — o botão de regex sinaliza isso.</summary>
+    private bool RegexInvalida => _usarRegex && !LogFilter.IsValidRegex(_textoPesquisa);
+
+    private HashSet<string> NiveisSelecionados
     {
-        get => _filtroRapido;
+        get => _niveisSelecionados;
         set
         {
-            if (_filtroRapido != value)
-            {
-                _filtroRapido = value;
-                AplicarFiltros();
-            }
+            _niveisSelecionados = value;
+            AplicarFiltros();
         }
     }
 
@@ -206,6 +261,7 @@
         // LogStore e LogGroupService são singletons, então um handler não removido
         // mantém este componente vivo enquanto o app existir.
         Store.Changed += OnStoreChanged;
+        Store.PathsLoaded += OnPathsLoaded;
         GroupService.Changed += OnGroupsChanged;
 
         if (Store.IsLoading)
@@ -281,16 +337,79 @@
 
     private void OnGroupsChanged() => _ = InvokeAsync(StateHasChanged);
 
+    /// <summary>
+    /// Um conjunto novo de caminhos foi carregado (menu Abrir, arrastar e soltar, linha de
+    /// comando ou outra instância): a seleção de arquivos visíveis não vale mais.
+    /// </summary>
+    private void OnPathsLoaded() => _visibleFiles = null;
+
+    // --- Atalhos de teclado ------------------------------------------------------
+
+    private DotNetObjectReference<LogViewer>? _shortcutRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        try
+        {
+            _shortcutRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("clefShortcuts.register", _shortcutRef);
+        }
+        catch (Exception ex)
+        {
+            // Sem atalhos o app segue utilizável pelo mouse.
+            AppLog.Warning("Não foi possível registrar os atalhos de teclado", ex);
+        }
+    }
+
+    /// <summary>Recebe as ações traduzidas pelo listener de teclado (wwwroot/js/shortcuts.js).</summary>
+    [JSInvokable]
+    public async Task OnShortcut(string action)
+    {
+        switch (action)
+        {
+            case "open-file": await AbrirArquivoDialog(); break;
+            case "open-folder": await AbrirPastaDialog(); break;
+            case "export": await ExportarFiltrados(); break;
+            case "toggle-tail": AlternarAoVivo(); break;
+            case "reload": Carregar(); break;
+            case "next": MoverSelecao(1); break;
+            case "previous": MoverSelecao(-1); break;
+            default: return;
+        }
+
+        StateHasChanged();
+    }
+
+    /// <summary>Move a seleção dentro da página atual (setas ↑/↓).</summary>
+    private void MoverSelecao(int delta)
+    {
+        if (_eventos.Count == 0) return;
+
+        var atual = _selected is null ? -1 : _eventos.IndexOf(_selected);
+        // Sem seleção: ↓ começa no primeiro, ↑ no último.
+        var proximo = atual < 0
+            ? (delta > 0 ? 0 : _eventos.Count - 1)
+            : Math.Clamp(atual + delta, 0, _eventos.Count - 1);
+
+        _selected = _eventos[proximo];
+    }
+
     public void Dispose()
     {
+        _ = JS.InvokeVoidAsync("clefShortcuts.unregister");
+        _shortcutRef?.Dispose();
+
         Store.Changed -= OnStoreChanged;
+        Store.PathsLoaded -= OnPathsLoaded;
         GroupService.Changed -= OnGroupsChanged;
 
-        var cts = Interlocked.Exchange(ref _filterCts, null);
-        if (cts is not null)
+        foreach (var campo in new[] { Interlocked.Exchange(ref _filterCts, null), Interlocked.Exchange(ref _debounceCts, null) })
         {
-            try { cts.Cancel(); } catch (ObjectDisposedException) { }
-            cts.Dispose();
+            if (campo is null) continue;
+            try { campo.Cancel(); } catch (ObjectDisposedException) { }
+            campo.Dispose();
         }
     }
 
@@ -355,10 +474,14 @@
             var criterios = new LogFilterCriteria
             {
                 VisibleFiles = _visibleFiles,
-                QuickLevel = _filtroRapido,
+                Levels = _niveisSelecionados.Count > 0 ? _niveisSelecionados : null,
                 From = _dataInicial,
                 To = _dataFinal,
                 Search = _textoPesquisa,
+                UseRegex = _usarRegex,
+                // O Store mantém os eventos ordenados e os filtros preservam a ordem
+                // relativa, então não há por que reordenar tudo a cada filtragem.
+                InputAlreadySorted = true,
             };
 
             await Task.Run(() =>
@@ -446,6 +569,58 @@
             await Store.LoadFromPathsAsync(group.Paths);
             _isBusy = false;
             StateHasChanged();
+        }
+    }
+
+    /// <summary>Interrompe o carregamento em andamento, preservando o conteúdo anterior.</summary>
+    private void CancelarCarregamento()
+    {
+        Store.CancelLoad();
+        Notifications.Info("Carregamento cancelado");
+    }
+
+    /// <summary>Liga/desliga o acompanhamento ao vivo dos arquivos carregados.</summary>
+    private void AlternarAoVivo()
+    {
+        var ligando = !Store.TailEnabled;
+        Store.SetTailEnabled(ligando);
+
+        Notifications.Info(
+            ligando ? "Acompanhamento ao vivo ligado" : "Acompanhamento ao vivo desligado",
+            ligando ? "Novos eventos gravados nos arquivos carregados aparecerão automaticamente." : null);
+    }
+
+    /// <summary>
+    /// Exporta o conjunto FILTRADO inteiro — não apenas a página exibida, que é o que o
+    /// usuário vê mas raramente o que quer compartilhar.
+    /// </summary>
+    private async Task ExportarFiltrados()
+    {
+        if (_todosEventos.Count == 0) return;
+
+        // Snapshot antes do diálogo: a filtragem e o modo ao vivo substituem _todosEventos
+        // de forma assíncrona, então exportar direto do campo poderia gravar um conjunto
+        // diferente do que foi contado na mensagem de sucesso.
+        var paraExportar = _todosEventos.ToArray();
+
+        var sugestao = $"clef-export-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
+        var destino = await FilePicker.PickSaveFileAsync(LogExporter.DialogFilter, sugestao);
+        if (destino is null) return;
+
+        try
+        {
+            var formato = LogExporter.FormatFromPath(destino);
+            var conteudo = await Task.Run(() => LogExporter.Export(paraExportar, formato));
+            await File.WriteAllTextAsync(destino, conteudo);
+
+            Notifications.Success(
+                $"{paraExportar.Length} eventos exportados",
+                Path.GetFileName(destino));
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"Falha ao exportar para '{destino}'", ex);
+            Notifications.Error("Não foi possível exportar", ex.Message);
         }
     }
 
