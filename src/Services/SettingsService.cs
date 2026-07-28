@@ -35,6 +35,7 @@ namespace ClefExplorer.Services
             }
             catch (Exception ex)
             {
+                AppLog.Error("Falha ao salvar as configurações", ex);
                 LastError = $"Não foi possível salvar as configurações: {ex.Message}";
             }
         }
@@ -53,6 +54,7 @@ namespace ClefExplorer.Services
             {
                 // Não sobrescrever o arquivo do usuário: move para .corrupt para que a próxima
                 // gravação não apague silenciosamente o conteúdo que não conseguimos ler.
+                AppLog.Error($"Configurações inválidas em '{FileName}'", ex);
                 var quarantined = _storage.Quarantine(FileName);
                 _settings = new Settings();
                 LastError = quarantined is null

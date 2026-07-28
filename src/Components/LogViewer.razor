@@ -7,7 +7,9 @@
 @inject LogGroupService GroupService
 @inject IFilePickerService FilePicker
 @inject FileAssociationService FileAssociationService
+@inject SettingsService SettingsService
 @inject DialogService Dialog
+@inject NotificationService Notifications
 
 <div class="clef-root">
     <LogHeader @bind-TextoPesquisa="TextoPesquisa"
@@ -216,6 +218,46 @@
         }
 
         CheckDefaultApp();
+        ReportarErrosDeInicializacao();
+    }
+
+    /// <summary>
+    /// Os serviços de configuração são construídos pela DI antes de existir UI, então um
+    /// arquivo inválido ou uma pasta sem permissão só pode ser reportado aqui. Antes esses
+    /// erros eram engolidos e o usuário via a configuração simplesmente "sumir".
+    /// </summary>
+    private void ReportarErrosDeInicializacao()
+    {
+        if (SettingsService.LastError is { } erroConfig)
+        {
+            Notifications.Error("Configurações", erroConfig);
+        }
+
+        if (GroupService.LastError is { } erroGrupos)
+        {
+            Notifications.Error("Grupos de log", erroGrupos);
+        }
+    }
+
+    /// <summary>Avisa sobre arquivos que não puderam ser lidos no último carregamento.</summary>
+    private void ReportarFalhasDeLeitura()
+    {
+        var falhas = Store.LoadFailures;
+        if (falhas.Count == 0) return;
+
+        var resumo = falhas.Count == 1
+            ? "1 arquivo não pôde ser lido"
+            : $"{falhas.Count} arquivos não puderam ser lidos";
+
+        // Detalhar até 3 para a mensagem não virar uma parede de texto; o restante
+        // fica no log de diagnóstico do app.
+        var detalhe = string.Join("\n", falhas.Take(3).Select(f => $"{Path.GetFileName(f.Path)}: {f.Reason}"));
+        if (falhas.Count > 3)
+        {
+            detalhe += $"\n(e mais {falhas.Count - 3}; veja {AppLog.FilePath})";
+        }
+
+        Notifications.Warning(resumo, detalhe);
     }
 
     private void OnStoreChanged() => _ = InvokeAsync(() =>
@@ -232,6 +274,7 @@
         }
         else
         {
+            ReportarFalhasDeLeitura();
             AplicarFiltros();
         }
     });
@@ -260,9 +303,10 @@
                 _showDefaultAppNotification = true;
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignora erros ao verificar associação
+            // Não é acionável pelo usuário: apenas não exibimos o aviso de app padrão.
+            AppLog.Warning("Falha ao verificar a associação de arquivos", ex);
         }
     }
 
@@ -342,8 +386,10 @@
         {
             // Filtragem substituída por outra mais recente — descarte esperado.
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            AppLog.Error("Falha ao aplicar os filtros", ex);
+            Notifications.Error("Não foi possível aplicar os filtros", ex.Message);
             _isBusy = false;
             StateHasChanged();
         }

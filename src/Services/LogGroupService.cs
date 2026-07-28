@@ -70,6 +70,7 @@ namespace ClefExplorer.Services
                 // Um groups.json inválido zerava a lista em memória e a próxima gravação
                 // apagava os grupos do usuário. Agora o arquivo vai para .corrupt e o erro
                 // fica registrado para ser exibido.
+                AppLog.Error($"Arquivo de grupos inválido em '{FileName}'", ex);
                 var quarantined = _storage.Quarantine(FileName);
                 _groups = new List<LogGroup>();
                 LastError = quarantined is null
@@ -88,6 +89,7 @@ namespace ClefExplorer.Services
             }
             catch (Exception ex)
             {
+                AppLog.Error("Falha ao salvar os grupos", ex);
                 LastError = $"Não foi possível salvar os grupos: {ex.Message}";
             }
         }

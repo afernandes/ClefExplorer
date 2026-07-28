@@ -20,6 +20,7 @@ namespace ClefExplorer.Services
         private string? _fileName;
         private readonly List<string> _loadedFiles = new();
         private readonly List<string> _availableFiles = new();
+        private readonly List<LoadFailure> _loadFailures = new();
 
         public event Action? Changed;
 
@@ -57,6 +58,27 @@ namespace ClefExplorer.Services
         public IReadOnlyList<string> LoadedFiles => _loadedFiles;
         public IReadOnlyList<string> AvailableFiles => _availableFiles;
 
+        /// <summary>
+        /// Caminhos que não puderam ser lidos no último carregamento, com o motivo.
+        /// Antes essas falhas eram engolidas por <c>catch { }</c> e o usuário só via
+        /// "faltando eventos", sem saber que um arquivo tinha ficado de fora.
+        /// </summary>
+        public IReadOnlyList<LoadFailure> LoadFailures
+        {
+            get { lock (_loadFailures) { return _loadFailures.ToArray(); } }
+        }
+
+        private void ClearFailures()
+        {
+            lock (_loadFailures) { _loadFailures.Clear(); }
+        }
+
+        private void RecordFailure(string path, Exception ex)
+        {
+            AppLog.Warning($"Falha ao ler '{path}'", ex);
+            lock (_loadFailures) { _loadFailures.Add(new LoadFailure(path, ex.Message)); }
+        }
+
         public async Task LoadFromFile(string path)
         {
             await LoadFromPathsAsync(new[] { path });
@@ -71,6 +93,7 @@ namespace ClefExplorer.Services
         {
             var pathList = paths.ToList();
             IsLoading = true;
+            ClearFailures();
             Changed?.Invoke();
 
             await Task.Run(async () =>
@@ -86,9 +109,9 @@ namespace ClefExplorer.Services
                     {
                         path = Path.GetFullPath(path);
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // Ignore invalid paths
+                        RecordFailure(rawPath, ex);
                         continue;
                     }
 
@@ -99,18 +122,22 @@ namespace ClefExplorer.Services
                     }
                     else if (Directory.Exists(path))
                     {
-                        try 
+                        try
                         {
                             var files = Directory.GetFiles(path, "*.clef", SearchOption.AllDirectories);
                             allFiles.AddRange(files);
-                            
+
                             var gzFiles = Directory.GetFiles(path, "*.clef.gz", SearchOption.AllDirectories);
                             allFiles.AddRange(gzFiles);
                         }
-                        catch 
+                        catch (Exception ex)
                         {
-                            // Ignore access errors
+                            RecordFailure(path, ex);
                         }
+                    }
+                    else
+                    {
+                        RecordFailure(path, new FileNotFoundException("Caminho não encontrado."));
                     }
                 }
                 
@@ -135,9 +162,11 @@ namespace ClefExplorer.Services
                     {
                         await ReadFileEvents(file, tempEvents);
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
-                        // ignore files that can't be read
+                        // Um arquivo ilegível não aborta os demais, mas fica registrado
+                        // para ser reportado ao usuário no fim do carregamento.
+                        RecordFailure(file, ex);
                     }
                 });
 
@@ -169,8 +198,9 @@ namespace ClefExplorer.Services
             var toRemove = currentSet.Except(newSet).ToList();
             
             if (!toAdd.Any() && !toRemove.Any()) return;
-            
+
             IsLoading = true;
+            ClearFailures();
             Changed?.Invoke();
             
             await Task.Run(async () => {
@@ -193,9 +223,9 @@ namespace ClefExplorer.Services
                          {
                              await ReadFileEvents(file, newEvents);
                          }
-                         catch
+                         catch (Exception ex)
                          {
-                             // ignore
+                             RecordFailure(file, ex);
                          }
                      });
                      

@@ -132,6 +132,59 @@ public class LogStoreTests : IDisposable
         Assert.Equal(1, store.Count);
     }
 
+    // --- Falhas de leitura reportadas -------------------------------------------
+
+    [Fact]
+    public async Task An_unreadable_file_is_recorded_as_a_failure()
+    {
+        // Antes essas falhas eram engolidas por catch {} e o usuário só via "faltando eventos".
+        WriteClef("bom.clef", ClefLine("ok"));
+        File.WriteAllText(Path.Combine(_root, "ruim.clef"), "isto não é CLEF");
+        var store = NewStore();
+
+        await store.LoadFromFolderAsync(_root);
+
+        var falha = Assert.Single(store.LoadFailures);
+        Assert.EndsWith("ruim.clef", falha.Path);
+        Assert.False(string.IsNullOrWhiteSpace(falha.Reason));
+    }
+
+    [Fact]
+    public async Task A_missing_path_is_recorded_as_a_failure()
+    {
+        var store = NewStore();
+
+        await store.LoadFromPathsAsync(new[] { Path.Combine(_root, "nao-existe") });
+
+        Assert.Single(store.LoadFailures);
+    }
+
+    [Fact]
+    public async Task A_successful_load_reports_no_failures()
+    {
+        WriteClef("bom.clef", ClefLine("ok"));
+        var store = NewStore();
+
+        await store.LoadFromFolderAsync(_root);
+
+        Assert.Empty(store.LoadFailures);
+    }
+
+    [Fact]
+    public async Task Failures_from_the_previous_load_are_cleared()
+    {
+        File.WriteAllText(Path.Combine(_root, "ruim.clef"), "isto não é CLEF");
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+        Assert.NotEmpty(store.LoadFailures);
+
+        File.Delete(Path.Combine(_root, "ruim.clef"));
+        WriteClef("bom.clef", ClefLine("ok"));
+        await store.LoadFromFolderAsync(_root);
+
+        Assert.Empty(store.LoadFailures);
+    }
+
     // --- Carregamento de pasta ---------------------------------------------------
 
     [Fact]
