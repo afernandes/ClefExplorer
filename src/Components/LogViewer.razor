@@ -206,6 +206,7 @@
         // LogStore e LogGroupService são singletons, então um handler não removido
         // mantém este componente vivo enquanto o app existir.
         Store.Changed += OnStoreChanged;
+        Store.PathsLoaded += OnPathsLoaded;
         GroupService.Changed += OnGroupsChanged;
 
         if (Store.IsLoading)
@@ -281,9 +282,16 @@
 
     private void OnGroupsChanged() => _ = InvokeAsync(StateHasChanged);
 
+    /// <summary>
+    /// Um conjunto novo de caminhos foi carregado (menu Abrir, arrastar e soltar, linha de
+    /// comando ou outra instância): a seleção de arquivos visíveis não vale mais.
+    /// </summary>
+    private void OnPathsLoaded() => _visibleFiles = null;
+
     public void Dispose()
     {
         Store.Changed -= OnStoreChanged;
+        Store.PathsLoaded -= OnPathsLoaded;
         GroupService.Changed -= OnGroupsChanged;
 
         var cts = Interlocked.Exchange(ref _filterCts, null);

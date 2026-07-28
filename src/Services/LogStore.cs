@@ -24,6 +24,14 @@ namespace ClefExplorer.Services
 
         public event Action? Changed;
 
+        /// <summary>
+        /// Disparado quando um conjunto NOVO de caminhos foi carregado — e não quando o
+        /// usuário apenas (des)marca arquivos na árvore (<see cref="UpdateLoadedFiles"/>).
+        /// Permite à UI limpar a seleção de arquivos visíveis sem interferir na interação
+        /// com a árvore, cuja fonte precisa ficar estável durante a marcação.
+        /// </summary>
+        public event Action? PathsLoaded;
+
         public LogStore(SettingsService settingsService)
         {
             _settingsService = settingsService;
@@ -186,6 +194,9 @@ namespace ClefExplorer.Services
             });
 
             IsLoading = false;
+            // PathsLoaded antes de Changed: assim quem escuta já limpou a seleção de
+            // arquivos visíveis quando a UI for recalcular os filtros.
+            PathsLoaded?.Invoke();
             Changed?.Invoke();
         }
 
