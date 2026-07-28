@@ -10,6 +10,7 @@
 @inject SettingsService SettingsService
 @inject DialogService Dialog
 @inject NotificationService Notifications
+@inject UiPreferencesService UiPreferences
 @inject IJSRuntime JS
 
 <div class="clef-root">
@@ -60,7 +61,10 @@
                                 TailEnabled="@Store.TailEnabled"
                                 OnToggleTail="AlternarAoVivo"
                                 IsLoading="@Store.IsLoading"
-                                OnCancelLoad="CancelarCarregamento" />
+                                OnCancelLoad="CancelarCarregamento"
+                                DetailVisible="@(_selected != null)"
+                                DetailAtBottom="@DetalheAbaixo"
+                                OnToggleDetailPosition="AlternarPosicaoDetalhe" />
 
                     <div class="clef-body">
                         @* Sem seleção: lista ocupa todo o espaço (sem splitter, evitando a
@@ -69,8 +73,14 @@
                            tem largura, então a medição funciona. *@
                         @if (_selected != null)
                         {
-                            <OmniSplitter Orientation="Orientation.Horizontal" Variant="SplitterVariant.Line">
-                                <OmniSplitterPane Min="320px">
+                            @* @key força a recriação do splitter ao trocar a orientação:
+                               ele mede e fixa os tamanhos dos panes na inicialização, então
+                               reaproveitar a instância deixaria as larguras da disposição
+                               anterior aplicadas na nova. *@
+                            <OmniSplitter @key="DetalheAbaixo"
+                                          Orientation="@(DetalheAbaixo ? Orientation.Vertical : Orientation.Horizontal)"
+                                          Variant="SplitterVariant.Line">
+                                <OmniSplitterPane Min="@(DetalheAbaixo ? "120px" : "320px")">
                                     <div class="clef-pane">
                                         <LogList IsBusy="@_isBusy"
                                                  Eventos="@_eventos"
@@ -78,7 +88,7 @@
                                                  OnSelect="Select" />
                                     </div>
                                 </OmniSplitterPane>
-                                <OmniSplitterPane Size="45%" Min="320px">
+                                <OmniSplitterPane Size="45%" Min="@(DetalheAbaixo ? "140px" : "320px")">
                                     <div class="clef-pane">
                                         <LogDetails SelectedEvent="@_selected" OnClose="CloseDetail" OnFilter="FiltrarPorTexto" />
                                     </div>
@@ -571,6 +581,15 @@
             StateHasChanged();
         }
     }
+
+    /// <summary>Painel de detalhes abaixo da lista (em vez de à direita).</summary>
+    private bool DetalheAbaixo => UiPreferences.Preferences.DetailPanelPosition == DetailPanelPosition.Bottom;
+
+    /// <summary>
+    /// Alterna entre detalhe à direita e abaixo. À direita funciona melhor em telas largas;
+    /// abaixo, para stack traces longos e telas estreitas. A escolha é persistida.
+    /// </summary>
+    private void AlternarPosicaoDetalhe() => UiPreferences.ToggleDetailPanelPosition();
 
     /// <summary>Interrompe o carregamento em andamento, preservando o conteúdo anterior.</summary>
     private void CancelarCarregamento()

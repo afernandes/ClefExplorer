@@ -35,6 +35,7 @@ namespace ClefExplorer
             services.AddOmniComponents();
             services.AddSingleton<AppStorage>();
             services.AddSingleton<WindowPlacementService>();
+            services.AddSingleton<UiPreferencesService>();
             services.AddSingleton<LogStore>();
             services.AddSingleton<LogGroupService>();
             services.AddSingleton<SettingsService>();
