@@ -23,6 +23,13 @@
                     Disabled="@(TotalCount == 0)"
                     Title="Exporta os eventos filtrados (não apenas a página atual)"
                     OnClick="OnExport" />
+        <OmniButton Icon="@(GridMode ? "list" : "grid")"
+                    IconOnly="true"
+                    Size="ComponentSize.Sm"
+                    Variant="@(GridMode ? ButtonVariant.Primary : ButtonVariant.Ghost)"
+                    Title="@(GridMode ? "Voltar para a lista" : "Exibir como tabela (ordenar, agrupar, escolher colunas)")"
+                    OnClick="OnToggleViewMode" />
+
         @* Só faz sentido quando há um detalhe aberto para reposicionar. O ícone aponta
            para ONDE o painel vai, e não onde ele está — a lib não tem ícones de painel,
            e a seta remove a ambiguidade. *@
@@ -54,6 +61,10 @@
     [Parameter] public EventCallback OnToggleTail { get; set; }
     [Parameter] public bool IsLoading { get; set; }
     [Parameter] public EventCallback OnCancelLoad { get; set; }
+
+    /// <summary>Exibindo em tabela (em vez da lista).</summary>
+    [Parameter] public bool GridMode { get; set; }
+    [Parameter] public EventCallback OnToggleViewMode { get; set; }
 
     /// <summary>Há um evento selecionado (o painel de detalhes está aberto).</summary>
     [Parameter] public bool DetailVisible { get; set; }

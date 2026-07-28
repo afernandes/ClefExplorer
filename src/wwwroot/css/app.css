@@ -607,3 +607,56 @@ span.omni-tree-text.clef-tree-backup { font-weight: 600; }
 .clef-path-list::-webkit-scrollbar-thumb:hover {
     background: var(--omni-fg-soft);
 }
+
+/* ---- Visão em tabela (OmniDataGrid) --------------------------------------- */
+.clef-grid {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--omni-bg);
+}
+
+/* Embed="true" faz o grid preencher o pai; garante o mesmo aqui. */
+.clef-grid > .omni-datagrid {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+/* Linha do evento selecionado: mesma leitura da lista. */
+.clef-grid .omni-datagrid tbody tr.is-selected {
+    background: color-mix(in oklab, var(--omni-accent) 14%, var(--omni-bg));
+}
+
+/* Barra à esquerda em erros/fatais, como na lista — cor, e não só o badge,
+   para o erro saltar mesmo com a coluna Nível oculta. */
+.clef-grid .omni-datagrid tbody tr.clef-grid-row-error td:first-child {
+    box-shadow: inset 3px 0 0 0 color-mix(in oklab, var(--omni-danger) 80%, var(--omni-fg));
+}
+
+.clef-grid .clef-grid-exc {
+    color: color-mix(in oklab, var(--omni-danger) 80%, var(--omni-fg));
+}
+
+/* Seletor de colunas da tabela (próprio, não o embutido do grid). */
+.clef-col-chooser {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.clef-col-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: var(--omni-radius);
+    font-size: 13px;
+    color: var(--omni-fg);
+    cursor: pointer;
+}
+
+.clef-col-item:hover { background: var(--omni-bg-sunken); }
+.clef-col-item input { cursor: pointer; }

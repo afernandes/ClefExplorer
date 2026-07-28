@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ClefExplorer.Models;
@@ -9,6 +11,16 @@ namespace ClefExplorer.Services
     public class UiPreferences
     {
         public DetailPanelPosition DetailPanelPosition { get; set; } = DetailPanelPosition.Right;
+
+        public LogViewMode ViewMode { get; set; } = LogViewMode.List;
+
+        /// <summary>
+        /// Colunas visíveis no modo tabela, por chave (fixas e descobertas). Guardamos por
+        /// nome, e não por posição: as colunas disponíveis vêm do conteúdo dos logs
+        /// carregados, então mudam conforme os arquivos abertos. Lista vazia = ainda não
+        /// escolhido, usa o padrão.
+        /// </summary>
+        public List<string> GridVisibleColumns { get; set; } = new();
     }
 
     /// <summary>
@@ -78,6 +90,24 @@ namespace ClefExplorer.Services
 
             Save();
             return _preferences.DetailPanelPosition;
+        }
+
+        /// <summary>Alterna entre lista e tabela e persiste a escolha.</summary>
+        public LogViewMode ToggleViewMode()
+        {
+            _preferences.ViewMode = _preferences.ViewMode == LogViewMode.List
+                ? LogViewMode.Grid
+                : LogViewMode.List;
+
+            Save();
+            return _preferences.ViewMode;
+        }
+
+        /// <summary>Grava quais colunas ficam visíveis no modo tabela.</summary>
+        public void SetGridVisibleColumns(IEnumerable<string> keys)
+        {
+            _preferences.GridVisibleColumns = keys.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            Save();
         }
     }
 }
