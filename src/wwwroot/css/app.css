@@ -192,6 +192,13 @@ span.omni-tree-text.clef-tree-backup { font-weight: 600; }
     color: var(--omni-fg-muted);
 }
 
+/* Ações da direita da toolbar (exportar + paginação) */
+.clef-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 /* ---- Lista de logs -------------------------------------------------------- */
 .clef-list {
     height: 100%;
