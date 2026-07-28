@@ -51,8 +51,12 @@ window.clefShortcuts = (function () {
                 const action = resolve(e);
                 if (!action) return;
 
-                // Com o cursor num campo, só Escape (limpar busca / fechar detalhe) age.
-                if (isTyping(document.activeElement) && action !== 'escape') return;
+                // Com o cursor num campo de texto, só combinações com Ctrl/⌘ (e F5) agem:
+                // as setas precisam continuar movendo o cursor dentro do texto. Bloquear
+                // TUDO impediria, por exemplo, Ctrl+F de focar a busca a partir de outro
+                // campo — que é justamente quando o atalho mais serve.
+                const explicito = e.ctrlKey || e.metaKey || e.key === 'F5';
+                if (isTyping(document.activeElement) && !explicito) return;
 
                 e.preventDefault();
 

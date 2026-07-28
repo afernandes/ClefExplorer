@@ -14,9 +14,14 @@ namespace ClefExplorer
 
             // Uma segunda instância apenas entrega seus caminhos à janela já aberta e sai.
             // Antes, selecionar N arquivos no Explorer abria N janelas.
-            if (!SingleInstance.TryAcquire(out var singleInstance))
+            //
+            // Só encerramos se a entrega der certo: se o pipe estiver indisponível (a outra
+            // instância travou, ou o mutex ficou órfão), sair sem abrir nada deixaria o
+            // usuário sem conseguir usar o aplicativo. Nesse caso seguimos como instância
+            // independente — mesma escolha feita quando o próprio mutex falha.
+            if (!SingleInstance.TryAcquire(out var singleInstance)
+                && SingleInstance.SendToExistingInstance(args))
             {
-                SingleInstance.SendToExistingInstance(args);
                 return;
             }
 

@@ -626,6 +626,36 @@ public class LogStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Tail_keeps_the_list_sorted_when_new_events_are_older()
+    {
+        // O tail intercala os novos eventos em vez de reordenar a lista inteira; um evento
+        // com carimbo antigo (relógio fora de sincronia, arquivo de outra origem) precisa
+        // cair na posição certa.
+        var file = WriteClef("app.clef",
+            ClefLine("mais novo", timestamp: "2026-06-20T00:00:00.0000000Z"),
+            ClefLine("meio", timestamp: "2026-06-10T00:00:00.0000000Z"));
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+
+        store.SetTailEnabled(true);
+        try
+        {
+            File.AppendAllText(file, ClefLine("antigo", timestamp: "2026-06-01T00:00:00.0000000Z") + Environment.NewLine);
+            File.AppendAllText(file, ClefLine("novissimo", timestamp: "2026-06-30T00:00:00.0000000Z") + Environment.NewLine);
+
+            Assert.True(await WaitUntil(() => store.Count == 4), "os eventos novos não foram captados");
+
+            Assert.Equal(
+                new[] { "novissimo", "mais novo", "meio", "antigo" },
+                store.Snapshot().Select(e => e.Message));
+        }
+        finally
+        {
+            store.SetTailEnabled(false);
+        }
+    }
+
+    [Fact]
     public async Task Tail_restarts_from_the_beginning_when_the_file_is_truncated()
     {
         // Rotação de log: o arquivo encolhe e o offset antigo deixa de valer.

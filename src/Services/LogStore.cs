@@ -449,10 +449,14 @@ namespace ClefExplorer.Services
 
                 if (novos.Count == 0) return;
 
+                // Merge em vez de reordenar tudo: a lista já está ordenada e o tail roda a
+                // cada segundo, então um Sort completo custaria O(n log n) sobre TODOS os
+                // eventos carregados só para inserir alguns poucos novos.
+                novos.Sort(PorTimestampDecrescente);
+
                 lock (_events)
                 {
-                    _events.AddRange(novos);
-                    _events.Sort((a, b) => Nullable.Compare(b.Timestamp, a.Timestamp));
+                    MergeOrdenado(_events, novos);
                 }
 
                 Changed?.Invoke();
@@ -461,6 +465,32 @@ namespace ClefExplorer.Services
             {
                 Interlocked.Exchange(ref _tailBusy, 0);
             }
+        }
+
+        /// <summary>Ordem de exibição: do mais recente para o mais antigo.</summary>
+        private static readonly Comparison<ClefEvent> PorTimestampDecrescente =
+            (a, b) => Nullable.Compare(b.Timestamp, a.Timestamp);
+
+        /// <summary>
+        /// Intercala <paramref name="novos"/> (já ordenado) em <paramref name="destino"/>
+        /// (também ordenado), em O(n+m) — em vez de concatenar e reordenar.
+        /// </summary>
+        private static void MergeOrdenado(List<ClefEvent> destino, List<ClefEvent> novos)
+        {
+            var resultado = new List<ClefEvent>(destino.Count + novos.Count);
+            int i = 0, j = 0;
+
+            while (i < destino.Count && j < novos.Count)
+            {
+                // <= 0 mantém os já existentes à frente em caso de empate (estabilidade).
+                resultado.Add(PorTimestampDecrescente(destino[i], novos[j]) <= 0 ? destino[i++] : novos[j++]);
+            }
+
+            while (i < destino.Count) resultado.Add(destino[i++]);
+            while (j < novos.Count) resultado.Add(novos[j++]);
+
+            destino.Clear();
+            destino.AddRange(resultado);
         }
 
         /// <summary>
@@ -517,12 +547,15 @@ namespace ClefExplorer.Services
         // regex e interpretado para CADA arquivo × CADA padrão: numa pasta com centenas de
         // logs e alguns padrões, isso é dezenas de milhares de compilações por carregamento.
         private Regex[]? _ignoredFileRegexes;
-        private List<string>? _ignoredFilePatternsSnapshot;
+        private string[]? _ignoredFilePatternsSnapshot;
         private readonly object _ignoredFilesGate = new();
 
         private Regex[] GetIgnoredFileRegexes()
         {
-            var patterns = _settingsService.Settings.IgnoredFilePatterns;
+            // Cópia antes de qualquer enumeração: Settings.IgnoredFilePatterns é a lista
+            // viva que a tela de configurações muta, enquanto o carregamento roda em
+            // background — enumerá-la direto lançaria "Collection was modified".
+            var patterns = _settingsService.Settings.IgnoredFilePatterns.ToArray();
 
             lock (_ignoredFilesGate)
             {
@@ -534,7 +567,7 @@ namespace ClefExplorer.Services
                     return _ignoredFileRegexes;
                 }
 
-                var compilados = new List<Regex>(patterns.Count);
+                var compilados = new List<Regex>(patterns.Length);
                 foreach (var pattern in patterns)
                 {
                     if (string.IsNullOrWhiteSpace(pattern)) continue;
@@ -550,7 +583,7 @@ namespace ClefExplorer.Services
                     }
                 }
 
-                _ignoredFilePatternsSnapshot = new List<string>(patterns);
+                _ignoredFilePatternsSnapshot = patterns;
                 _ignoredFileRegexes = compilados.ToArray();
                 return _ignoredFileRegexes;
             }
@@ -568,7 +601,9 @@ namespace ClefExplorer.Services
 
         private bool IsLogIgnored(ClefEvent ev)
         {
-            foreach (var text in _settingsService.Settings.IgnoredLogLines)
+            // Cópia pelo mesmo motivo de GetIgnoredFileRegexes: a lista é mutada pela tela
+            // de configurações enquanto isto roda em background, por evento lido.
+            foreach (var text in _settingsService.Settings.IgnoredLogLines.ToArray())
             {
                 if (string.IsNullOrWhiteSpace(text)) continue;
                 if ((ev.Message ?? "").Contains(text, StringComparison.OrdinalIgnoreCase) ||
