@@ -14,6 +14,8 @@
 <div class="clef-root">
     <LogHeader @bind-TextoPesquisa="TextoPesquisa"
                @bind-QuantidadeRegistros="QuantidadeRegistros"
+               @bind-UsarRegex="UsarRegex"
+               RegexInvalida="@RegexInvalida"
                OnReload="Carregar" />
 
     @if (_showDefaultAppNotification)
@@ -32,7 +34,7 @@
         <OmniSplitter Orientation="Orientation.Horizontal" Variant="SplitterVariant.Line">
             <OmniSplitterPane Size="260px" Min="200px" Max="600px">
                 <div class="clef-pane">
-                    <LogSidebar @bind-FiltroRapido="FiltroRapido"
+                    <LogSidebar @bind-NiveisSelecionados="NiveisSelecionados"
                                 @bind-VisibleFiles="VisibleFiles"
                                 @bind-DataInicial="DataInicial"
                                 @bind-DataFinal="DataFinal"
@@ -106,7 +108,8 @@
     private int _quantidadeRegistros = 50;
     private int _pagina = 1;
     private string _textoPesquisa = string.Empty;
-    private string _filtroRapido = "Todos";
+    private HashSet<string> _niveisSelecionados = new(StringComparer.OrdinalIgnoreCase);
+    private bool _usarRegex;
     private HashSet<string>? _visibleFiles;
     private DateTime? _dataInicial;
     private DateTime? _dataFinal;
@@ -185,16 +188,26 @@
         }
     }
 
-    private string FiltroRapido
+    private bool UsarRegex
     {
-        get => _filtroRapido;
+        get => _usarRegex;
         set
         {
-            if (_filtroRapido != value)
-            {
-                _filtroRapido = value;
-                AplicarFiltros();
-            }
+            _usarRegex = value;
+            AplicarFiltros();
+        }
+    }
+
+    /// <summary>Padrão digitado ainda não compila — o botão de regex sinaliza isso.</summary>
+    private bool RegexInvalida => _usarRegex && !LogFilter.IsValidRegex(_textoPesquisa);
+
+    private HashSet<string> NiveisSelecionados
+    {
+        get => _niveisSelecionados;
+        set
+        {
+            _niveisSelecionados = value;
+            AplicarFiltros();
         }
     }
 
@@ -404,10 +417,11 @@
             var criterios = new LogFilterCriteria
             {
                 VisibleFiles = _visibleFiles,
-                QuickLevel = _filtroRapido,
+                Levels = _niveisSelecionados.Count > 0 ? _niveisSelecionados : null,
                 From = _dataInicial,
                 To = _dataFinal,
                 Search = _textoPesquisa,
+                UseRegex = _usarRegex,
                 // O Store mantém os eventos ordenados e os filtros preservam a ordem
                 // relativa, então não há por que reordenar tudo a cada filtragem.
                 InputAlreadySorted = true,

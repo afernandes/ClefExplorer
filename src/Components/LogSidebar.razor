@@ -31,22 +31,22 @@
     <div class="clef-sidebar-scroll">
         <div class="clef-section-label">Filtros Rápidos</div>
         <div class="clef-filters">
-            <button type="button" class="clef-filter @(FiltroRapido == "Todos" ? "is-active" : "")" @onclick='() => SetFiltroRapido("Todos")'>
+            @* "Todos" limpa a seleção; os demais alternam, permitindo combinar níveis
+               (ex.: Erros + Avisos) — antes só dava para escolher um. *@
+            <button type="button" class="clef-filter @(NenhumNivelSelecionado ? "is-active" : "")"
+                    @onclick="LimparNiveis">
                 <OmniIcon Name="inbox" Size="ComponentSize.Sm" />
                 <span>Todos</span>
             </button>
-            <button type="button" class="clef-filter clef-filter-error @(FiltroRapido == "Error" ? "is-active" : "")" @onclick='() => SetFiltroRapido("Error")'>
-                <OmniIcon Name="alert-circle" Size="ComponentSize.Sm" />
-                <span>Erros</span>
-            </button>
-            <button type="button" class="clef-filter clef-filter-warn @(FiltroRapido == "Warning" ? "is-active" : "")" @onclick='() => SetFiltroRapido("Warning")'>
-                <OmniIcon Name="alert-triangle" Size="ComponentSize.Sm" />
-                <span>Avisos</span>
-            </button>
-            <button type="button" class="clef-filter clef-filter-info @(FiltroRapido == "Information" ? "is-active" : "")" @onclick='() => SetFiltroRapido("Information")'>
-                <OmniIcon Name="info" Size="ComponentSize.Sm" />
-                <span>Informações</span>
-            </button>
+            @foreach (var grupo in Grupos)
+            {
+                var g = grupo;
+                <button type="button" class="clef-filter @g.Css @(GrupoAtivo(g) ? "is-active" : "")"
+                        @onclick="() => AlternarGrupo(g)">
+                    <OmniIcon Name="@g.Icone" Size="ComponentSize.Sm" />
+                    <span>@g.Rotulo</span>
+                </button>
+            }
         </div>
 
         <div class="clef-section-label">Período</div>
@@ -72,8 +72,8 @@
 </aside>
 
 @code {
-    [Parameter] public string FiltroRapido { get; set; } = "Todos";
-    [Parameter] public EventCallback<string> FiltroRapidoChanged { get; set; }
+    [Parameter] public HashSet<string> NiveisSelecionados { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    [Parameter] public EventCallback<HashSet<string>> NiveisSelecionadosChanged { get; set; }
 
     [Parameter] public HashSet<string>? VisibleFiles { get; set; }
     [Parameter] public EventCallback<HashSet<string>?> VisibleFilesChanged { get; set; }
@@ -103,10 +103,49 @@
         await action();
     }
 
-    private async Task SetFiltroRapido(string filtro)
+    /// <summary>Um botão de filtro e os níveis do Serilog que ele representa.</summary>
+    private sealed record GrupoNivel(string Rotulo, string Icone, string Css, string[] Niveis);
+
+    // "Erros" cobre Error e Fatal — um Fatal não pode escapar de quem procura erros.
+    private static readonly GrupoNivel[] Grupos =
     {
-        FiltroRapido = filtro;
-        await FiltroRapidoChanged.InvokeAsync(filtro);
+        new("Erros", "alert-circle", "clef-filter-error", new[] { "Error", "Fatal" }),
+        new("Avisos", "alert-triangle", "clef-filter-warn", new[] { "Warning" }),
+        new("Informações", "info", "clef-filter-info", new[] { "Information" }),
+        new("Debug", "bug", "clef-filter-debug", new[] { "Debug" }),
+        new("Verbose", "list", "clef-filter-verbose", new[] { "Verbose" }),
+    };
+
+    private bool NenhumNivelSelecionado => NiveisSelecionados.Count == 0;
+
+    private bool GrupoAtivo(GrupoNivel grupo) => grupo.Niveis.All(NiveisSelecionados.Contains);
+
+    private async Task LimparNiveis()
+    {
+        if (NenhumNivelSelecionado) return;
+        await AtualizarNiveis(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private async Task AlternarGrupo(GrupoNivel grupo)
+    {
+        var novos = new HashSet<string>(NiveisSelecionados, StringComparer.OrdinalIgnoreCase);
+
+        if (GrupoAtivo(grupo))
+        {
+            foreach (var nivel in grupo.Niveis) novos.Remove(nivel);
+        }
+        else
+        {
+            foreach (var nivel in grupo.Niveis) novos.Add(nivel);
+        }
+
+        await AtualizarNiveis(novos);
+    }
+
+    private async Task AtualizarNiveis(HashSet<string> niveis)
+    {
+        NiveisSelecionados = niveis;
+        await NiveisSelecionadosChanged.InvokeAsync(niveis);
     }
 
     private async Task OnSelectionChanged(HashSet<string> selectedFiles)
