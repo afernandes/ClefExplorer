@@ -42,8 +42,11 @@
                         Title="@(DetailAtBottom ? "Mover o painel de detalhes para a direita" : "Mover o painel de detalhes para baixo")"
                         OnClick="OnToggleDetailPosition" />
         }
-        <OmniPagination CurrentPage="CurrentPage"
-                        CurrentPageChanged="CurrentPageChanged"
+        @* OmniPagination é zero-based; o app conta a partir de 1 (é o que aparece no
+           "X-Y de Z"). Sem a conversão, a página 1 era exibida como "2" e a última
+           ficava inalcançável. A tradução fica aqui, na fronteira com o componente. *@
+        <OmniPagination CurrentPage="@(CurrentPage - 1)"
+                        CurrentPageChanged="@(i => CurrentPageChanged.InvokeAsync(i + 1))"
                         TotalCount="TotalCount"
                         PageSize="PageSize"
                         Compact="true" />

@@ -9,29 +9,33 @@
             <span>Carregando logs...</span>
         </div>
     }
-    else if (Eventos != null && Eventos.Any())
+    else if (_itens.Count > 0)
     {
-        @foreach (var e in Eventos)
-        {
-            var ev = e;
-            var selected = ReferenceEquals(SelectedEvent, ev);
-            <div class="clef-list-item @(selected ? "is-selected" : "")" @onclick="@(() => OnSelect.InvokeAsync(ev))">
-                <div class="clef-list-item-body">
-                    <div class="clef-list-item-row">
-                        <OmniBadge Text="@ev.Level" Variant="LogLevelStyles.Variant(ev.Level)" />
-                        <span class="clef-list-item-time">@ev.Timestamp?.ToString("HH:mm:ss")</span>
-                    </div>
-                    <div class="clef-list-item-title" title="@ev.Message">@ev.Message</div>
-                    <div class="clef-list-item-meta">
-                        @if (!string.IsNullOrEmpty(ev.Exception))
-                        {
-                            <span class="clef-exception-flag"><OmniIcon Name="zap" Size="ComponentSize.Sm" /> Exception</span>
-                        }
-                        <span>@ObterResumoProps(ev)</span>
+        @* Virtualizado: só as linhas visíveis (mais um pequeno overscan) vão ao DOM.
+           Height=null porque o pai (.clef-list) já limita a altura e faz o scroll —
+           sem altura limitada o Virtualize renderizaria tudo. É o que permite páginas
+           grandes (500/1000) sem a UI travar. *@
+        <OmniVirtualize TItem="ClefEvent" Items="_itens" Height="null" ItemSize="76">
+            <ItemContent Context="ev">
+                <div class="clef-list-item @(ReferenceEquals(SelectedEvent, ev) ? "is-selected" : "")"
+                     @onclick="@(() => OnSelect.InvokeAsync(ev))">
+                    <div class="clef-list-item-body">
+                        <div class="clef-list-item-row">
+                            <OmniBadge Text="@ev.Level" Variant="LogLevelStyles.Variant(ev.Level)" />
+                            <span class="clef-list-item-time">@ev.Timestamp?.ToString("HH:mm:ss")</span>
+                        </div>
+                        <div class="clef-list-item-title" title="@ev.Message">@ev.Message</div>
+                        <div class="clef-list-item-meta">
+                            @if (!string.IsNullOrEmpty(ev.Exception))
+                            {
+                                <span class="clef-exception-flag"><OmniIcon Name="zap" Size="ComponentSize.Sm" /> Exception</span>
+                            }
+                            <span>@ObterResumoProps(ev)</span>
+                        </div>
                     </div>
                 </div>
-            </div>
-        }
+            </ItemContent>
+        </OmniVirtualize>
     }
     else
     {
@@ -46,6 +50,15 @@
     [Parameter] public IEnumerable<ClefEvent> Eventos { get; set; } = Enumerable.Empty<ClefEvent>();
     [Parameter] public ClefEvent? SelectedEvent { get; set; }
     [Parameter] public EventCallback<ClefEvent> OnSelect { get; set; }
+
+    /// <summary>
+    /// O <c>OmniVirtualize</c> exige <c>ICollection</c>: materializa uma vez por mudança de
+    /// parâmetros, em vez de a cada render.
+    /// </summary>
+    private ICollection<ClefEvent> _itens = Array.Empty<ClefEvent>();
+
+    protected override void OnParametersSet() =>
+        _itens = Eventos as ICollection<ClefEvent> ?? Eventos?.ToList() ?? (ICollection<ClefEvent>)Array.Empty<ClefEvent>();
 
     private string ObterResumoProps(ClefEvent e)
     {
