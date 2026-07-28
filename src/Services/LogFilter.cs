@@ -22,6 +22,14 @@ namespace ClefExplorer.Services
 
         /// <summary>Busca textual em mensagem, exceção e valores das propriedades.</summary>
         public string? Search { get; init; }
+
+        /// <summary>
+        /// Quando a entrada já vem do mais recente para o mais antigo, dispensa a ordenação
+        /// final — os filtros do LINQ preservam a ordem relativa. O <c>LogStore</c> mantém
+        /// os eventos ordenados, então a UI liga isto e evita um O(n log n) por tecla
+        /// digitada. Padrão <c>false</c>: quem não garante a ordem continua seguro.
+        /// </summary>
+        public bool InputAlreadySorted { get; init; }
     }
 
     /// <summary>
@@ -75,7 +83,9 @@ namespace ClefExplorer.Services
                 query = query.Where(e => Matches(e, term));
             }
 
-            return query.OrderByDescending(e => e.Timestamp).ToList();
+            return criteria.InputAlreadySorted
+                ? query.ToList()
+                : query.OrderByDescending(e => e.Timestamp).ToList();
         }
 
         private static bool IsLevel(ClefEvent e, string level) =>

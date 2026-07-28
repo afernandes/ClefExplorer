@@ -225,6 +225,35 @@ public class LogFilterTests
     }
 
     [Fact]
+    public void InputAlreadySorted_preserves_the_input_order()
+    {
+        // Otimização: os filtros do LINQ preservam a ordem relativa, então quando a
+        // entrada já vem ordenada (como a do LogStore) a reordenação é desperdício.
+        var a = Event(message: "primeiro", timestamp: new DateTimeOffset(2026, 6, 20, 0, 0, 0, TimeSpan.Zero));
+        var b = Event(message: "segundo", timestamp: new DateTimeOffset(2026, 6, 10, 0, 0, 0, TimeSpan.Zero));
+        var c = Event(message: "terceiro", timestamp: new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero));
+
+        var result = LogFilter.Apply(new[] { a, b, c }, new LogFilterCriteria { InputAlreadySorted = true });
+
+        Assert.Equal(new[] { "primeiro", "segundo", "terceiro" }, result.Select(e => e.Message));
+    }
+
+    [Fact]
+    public void InputAlreadySorted_still_applies_every_filter()
+    {
+        var eventos = new[] { Event("Error", "manter"), Event("Information", "descartar") };
+
+        var result = LogFilter.Apply(eventos, new LogFilterCriteria
+        {
+            QuickLevel = LogFilter.QuickError,
+            InputAlreadySorted = true,
+        });
+
+        Assert.Single(result);
+        Assert.Equal("manter", result[0].Message);
+    }
+
+    [Fact]
     public void Empty_source_returns_empty()
     {
         var result = LogFilter.Apply(Array.Empty<ClefEvent>(), Criteria(LogFilter.QuickError));

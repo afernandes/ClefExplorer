@@ -423,18 +423,55 @@ namespace ClefExplorer.Services
             return resultado;
         }
 
+        // Cache dos padrões de exclusão já compilados. Antes, o wildcard era convertido em
+        // regex e interpretado para CADA arquivo × CADA padrão: numa pasta com centenas de
+        // logs e alguns padrões, isso é dezenas de milhares de compilações por carregamento.
+        private Regex[]? _ignoredFileRegexes;
+        private List<string>? _ignoredFilePatternsSnapshot;
+        private readonly object _ignoredFilesGate = new();
+
+        private Regex[] GetIgnoredFileRegexes()
+        {
+            var patterns = _settingsService.Settings.IgnoredFilePatterns;
+
+            lock (_ignoredFilesGate)
+            {
+                // Reconstrói só quando as configurações mudam.
+                if (_ignoredFileRegexes is not null
+                    && _ignoredFilePatternsSnapshot is not null
+                    && _ignoredFilePatternsSnapshot.SequenceEqual(patterns))
+                {
+                    return _ignoredFileRegexes;
+                }
+
+                var compilados = new List<Regex>(patterns.Count);
+                foreach (var pattern in patterns)
+                {
+                    if (string.IsNullOrWhiteSpace(pattern)) continue;
+
+                    var regexPattern = "^" + Regex.Escape(pattern).Replace("\\*", ".*").Replace("\\?", ".") + "$";
+                    try
+                    {
+                        compilados.Add(new Regex(regexPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled));
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLog.Warning($"Padrão de arquivo ignorado é inválido: '{pattern}'", ex);
+                    }
+                }
+
+                _ignoredFilePatternsSnapshot = new List<string>(patterns);
+                _ignoredFileRegexes = compilados.ToArray();
+                return _ignoredFileRegexes;
+            }
+        }
+
         private bool IsFileIgnored(string filePath)
         {
             var fileName = Path.GetFileName(filePath);
-            foreach (var pattern in _settingsService.Settings.IgnoredFilePatterns)
+            foreach (var regex in GetIgnoredFileRegexes())
             {
-                if (string.IsNullOrWhiteSpace(pattern)) continue;
-                // Simple wildcard to regex conversion
-                var regexPattern = "^" + Regex.Escape(pattern).Replace("\\*", ".*").Replace("\\?", ".") + "$";
-                if (Regex.IsMatch(fileName, regexPattern, RegexOptions.IgnoreCase))
-                {
-                    return true;
-                }
+                if (regex.IsMatch(fileName)) return true;
             }
             return false;
         }

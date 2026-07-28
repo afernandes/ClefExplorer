@@ -260,6 +260,54 @@ public class LogStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Changing_the_ignored_patterns_takes_effect_on_the_next_load()
+    {
+        // O cache de regex compilada precisa ser invalidado quando as configurações mudam.
+        WriteClef("app.clef", ClefLine("mantido"));
+        WriteClef("ruidoso.clef", ClefLine("barulho"));
+        var store = NewStore(out var settings);
+
+        await store.LoadFromFolderAsync(_root);
+        Assert.Equal(2, store.Count);
+
+        settings.Settings.IgnoredFilePatterns.Add("ruidoso.clef");
+        await store.LoadFromFolderAsync(_root);
+        Assert.Equal(1, store.Count);
+
+        settings.Settings.IgnoredFilePatterns.Clear();
+        await store.LoadFromFolderAsync(_root);
+        Assert.Equal(2, store.Count);
+    }
+
+    [Fact]
+    public async Task Ignore_patterns_treat_regex_metacharacters_literally()
+    {
+        // O padrão é wildcard, não regex: só '*' e '?' são curingas. Um '.' precisa
+        // casar com um ponto de verdade, senão "a.clef" excluiria "axclef" também.
+        WriteClef("axclef.clef", ClefLine("nao deve ser excluido"));
+        var store = NewStore(out var settings);
+        settings.Settings.IgnoredFilePatterns.Add("a.clef");
+
+        await store.LoadFromFolderAsync(_root);
+
+        Assert.Equal(1, store.Count);
+    }
+
+    [Fact]
+    public async Task Ignore_patterns_support_the_question_mark_wildcard()
+    {
+        WriteClef("log1.clef", ClefLine("um"));
+        WriteClef("log22.clef", ClefLine("dois"));
+        var store = NewStore(out var settings);
+        settings.Settings.IgnoredFilePatterns.Add("log?.clef");  // casa log1, não log22
+
+        await store.LoadFromFolderAsync(_root);
+
+        Assert.Equal(1, store.Count);
+        Assert.Equal("dois", store.Snapshot()[0].Message);
+    }
+
+    [Fact]
     public async Task An_explicitly_opened_file_is_loaded_even_if_a_pattern_ignores_it()
     {
         var file = WriteClef("ruidoso.clef", ClefLine("pedido explicitamente"));
