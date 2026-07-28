@@ -1,0 +1,374 @@
+using System.IO.Compression;
+using System.Text;
+using ClefExplorer.Services;
+
+namespace ClefExplorer.Tests;
+
+/// <summary>
+/// Testes do <see cref="LogStore"/> contra arquivos CLEF reais em pasta temporária:
+/// parsing, <c>.clef.gz</c>, padrões ignorados e (des)marcação de arquivos.
+/// </summary>
+public class LogStoreTests : IDisposable
+{
+    private readonly string _root;
+
+    public LogStoreTests()
+    {
+        _root = Path.Combine(Path.GetTempPath(), "ClefExplorerTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_root);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_root, recursive: true); } catch { /* limpeza best-effort */ }
+    }
+
+    /// <summary>Uma linha CLEF. O nível é omitido para Information, como o Serilog faz.</summary>
+    private static string ClefLine(string message, string? level = null, string timestamp = "2026-06-15T12:00:00.0000000Z")
+    {
+        var lvl = level is null ? "" : $@",""@l"":""{level}""";
+        return $@"{{""@t"":""{timestamp}"",""@mt"":""{message}""{lvl}}}";
+    }
+
+    private string WriteClef(string fileName, params string[] lines)
+    {
+        var path = Path.Combine(_root, fileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllLines(path, lines);
+        return path;
+    }
+
+    private string WriteClefGz(string fileName, params string[] lines)
+    {
+        var path = Path.Combine(_root, fileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using var fs = File.Create(path);
+        using var gz = new GZipStream(fs, CompressionMode.Compress);
+        gz.Write(Encoding.UTF8.GetBytes(string.Join(Environment.NewLine, lines)));
+        return path;
+    }
+
+    /// <summary>Store com um <see cref="AppStorage"/> isolado, para não tocar no %LOCALAPPDATA% real.</summary>
+    private LogStore NewStore(out SettingsService settings)
+    {
+        var storage = new AppStorage(Path.Combine(_root, "_config"), legacyFolder: null);
+        settings = new SettingsService(storage);
+        return new LogStore(settings);
+    }
+
+    private LogStore NewStore() => NewStore(out _);
+
+    // --- Parsing ----------------------------------------------------------------
+
+    [Fact]
+    public async Task Loads_events_from_a_clef_file()
+    {
+        var file = WriteClef("app.clef", ClefLine("primeira"), ClefLine("segunda", "Error"));
+        var store = NewStore();
+
+        await store.LoadFromFile(file);
+
+        Assert.Equal(2, store.Count);
+        Assert.Contains(store.Snapshot(), e => e.Message == "primeira");
+        Assert.Contains(store.Snapshot(), e => e.Level == "Error");
+    }
+
+    [Fact]
+    public async Task Level_defaults_to_Information_when_omitted()
+    {
+        var file = WriteClef("app.clef", ClefLine("sem nivel"));
+        var store = NewStore();
+
+        await store.LoadFromFile(file);
+
+        Assert.Equal("Information", store.Snapshot()[0].Level);
+    }
+
+    [Fact]
+    public async Task Records_the_source_file_on_each_event()
+    {
+        var file = WriteClef("app.clef", ClefLine("x"));
+        var store = NewStore();
+
+        await store.LoadFromFile(file);
+
+        Assert.Equal(file, store.Snapshot()[0].SourceFile);
+    }
+
+    [Fact]
+    public async Task Events_are_sorted_from_newest_to_oldest()
+    {
+        var file = WriteClef("app.clef",
+            ClefLine("antigo", timestamp: "2026-06-01T00:00:00.0000000Z"),
+            ClefLine("novo", timestamp: "2026-06-20T00:00:00.0000000Z"));
+        var store = NewStore();
+
+        await store.LoadFromFile(file);
+
+        Assert.Equal("novo", store.Snapshot()[0].Message);
+    }
+
+    [Fact]
+    public async Task Reads_a_gz_file_when_explicitly_requested()
+    {
+        var file = WriteClefGz("app.clef.gz", ClefLine("comprimido"));
+        var store = NewStore();
+
+        await store.LoadFromFile(file);
+
+        Assert.Equal(1, store.Count);
+        Assert.Equal("comprimido", store.Snapshot()[0].Message);
+    }
+
+    [Fact]
+    public async Task An_unreadable_file_does_not_abort_the_others()
+    {
+        WriteClef("bom.clef", ClefLine("ok"));
+        File.WriteAllText(Path.Combine(_root, "ruim.clef"), "isto não é CLEF");
+        var store = NewStore();
+
+        await store.LoadFromFolderAsync(_root);
+
+        Assert.Equal(1, store.Count);
+    }
+
+    // --- Falhas de leitura reportadas -------------------------------------------
+
+    [Fact]
+    public async Task An_unreadable_file_is_recorded_as_a_failure()
+    {
+        // Antes essas falhas eram engolidas por catch {} e o usuário só via "faltando eventos".
+        WriteClef("bom.clef", ClefLine("ok"));
+        File.WriteAllText(Path.Combine(_root, "ruim.clef"), "isto não é CLEF");
+        var store = NewStore();
+
+        await store.LoadFromFolderAsync(_root);
+
+        var falha = Assert.Single(store.LoadFailures);
+        Assert.EndsWith("ruim.clef", falha.Path);
+        Assert.False(string.IsNullOrWhiteSpace(falha.Reason));
+    }
+
+    [Fact]
+    public async Task A_missing_path_is_recorded_as_a_failure()
+    {
+        var store = NewStore();
+
+        await store.LoadFromPathsAsync(new[] { Path.Combine(_root, "nao-existe") });
+
+        Assert.Single(store.LoadFailures);
+    }
+
+    [Fact]
+    public async Task A_successful_load_reports_no_failures()
+    {
+        WriteClef("bom.clef", ClefLine("ok"));
+        var store = NewStore();
+
+        await store.LoadFromFolderAsync(_root);
+
+        Assert.Empty(store.LoadFailures);
+    }
+
+    [Fact]
+    public async Task Failures_from_the_previous_load_are_cleared()
+    {
+        File.WriteAllText(Path.Combine(_root, "ruim.clef"), "isto não é CLEF");
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+        Assert.NotEmpty(store.LoadFailures);
+
+        File.Delete(Path.Combine(_root, "ruim.clef"));
+        WriteClef("bom.clef", ClefLine("ok"));
+        await store.LoadFromFolderAsync(_root);
+
+        Assert.Empty(store.LoadFailures);
+    }
+
+    // --- Carregamento de pasta ---------------------------------------------------
+
+    [Fact]
+    public async Task Loads_clef_files_recursively_from_a_folder()
+    {
+        WriteClef("raiz.clef", ClefLine("a"));
+        WriteClef(Path.Combine("sub", "aninhado.clef"), ClefLine("b"));
+        var store = NewStore();
+
+        await store.LoadFromFolderAsync(_root);
+
+        Assert.Equal(2, store.Count);
+    }
+
+    [Fact]
+    public async Task Gz_files_in_a_folder_are_listed_but_not_loaded_by_default()
+    {
+        WriteClef("app.clef", ClefLine("normal"));
+        var gz = WriteClefGz("antigo.clef.gz", ClefLine("compactado"));
+        var store = NewStore();
+
+        await store.LoadFromFolderAsync(_root);
+
+        Assert.Equal(1, store.Count);                    // só o .clef entrou
+        Assert.Contains(gz, store.AvailableFiles);       // mas o .gz aparece na árvore
+        Assert.DoesNotContain(gz, store.LoadedFiles);
+    }
+
+    [Fact]
+    public async Task Invalid_paths_are_skipped()
+    {
+        var store = NewStore();
+
+        await store.LoadFromPathsAsync(new[] { Path.Combine(_root, "nao-existe") });
+
+        Assert.Equal(0, store.Count);
+    }
+
+    [Fact]
+    public async Task Expands_environment_variables_in_paths()
+    {
+        var file = WriteClef("app.clef", ClefLine("x"));
+        Environment.SetEnvironmentVariable("CLEF_TEST_DIR", _root);
+        try
+        {
+            var store = NewStore();
+
+            await store.LoadFromPathsAsync(new[] { Path.Combine("%CLEF_TEST_DIR%", "app.clef") });
+
+            Assert.Equal(1, store.Count);
+            Assert.Equal(file, store.Snapshot()[0].SourceFile);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CLEF_TEST_DIR", null);
+        }
+    }
+
+    // --- Configurações de exclusão ----------------------------------------------
+
+    [Fact]
+    public async Task Ignores_files_matching_a_wildcard_pattern()
+    {
+        WriteClef("app.clef", ClefLine("mantido"));
+        WriteClef("Totvs.Abp.TokenManager.Auth.clef", ClefLine("descartado"));
+        var store = NewStore(out var settings);
+        settings.Settings.IgnoredFilePatterns.Add("Totvs.Abp.TokenManager.*.clef");
+
+        await store.LoadFromFolderAsync(_root);
+
+        Assert.Equal(1, store.Count);
+        Assert.Equal("mantido", store.Snapshot()[0].Message);
+    }
+
+    [Fact]
+    public async Task An_explicitly_opened_file_is_loaded_even_if_a_pattern_ignores_it()
+    {
+        var file = WriteClef("ruidoso.clef", ClefLine("pedido explicitamente"));
+        var store = NewStore(out var settings);
+        settings.Settings.IgnoredFilePatterns.Add("ruidoso.clef");
+
+        await store.LoadFromFile(file);
+
+        Assert.Equal(1, store.Count);
+    }
+
+    [Fact]
+    public async Task Ignores_log_lines_containing_configured_text()
+    {
+        WriteClef("app.clef",
+            ClefLine("Notification received"),
+            ClefLine("erro de verdade", "Error"));
+        var store = NewStore(out var settings);
+        settings.Settings.IgnoredLogLines.Add("Notification received");
+
+        await store.LoadFromFolderAsync(_root);
+
+        Assert.Equal(1, store.Count);
+        Assert.Equal("erro de verdade", store.Snapshot()[0].Message);
+    }
+
+    // --- (Des)marcação de arquivos na árvore ------------------------------------
+
+    [Fact]
+    public async Task UpdateLoadedFiles_removes_the_events_of_unchecked_files()
+    {
+        var a = WriteClef("a.clef", ClefLine("de a"));
+        WriteClef("b.clef", ClefLine("de b"));
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+
+        await store.UpdateLoadedFiles(new[] { a });
+
+        Assert.Equal(1, store.Count);
+        Assert.Equal("de a", store.Snapshot()[0].Message);
+    }
+
+    [Fact]
+    public async Task UpdateLoadedFiles_adds_back_the_events_of_rechecked_files()
+    {
+        var a = WriteClef("a.clef", ClefLine("de a"));
+        var b = WriteClef("b.clef", ClefLine("de b"));
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+        await store.UpdateLoadedFiles(new[] { a });
+
+        await store.UpdateLoadedFiles(new[] { a, b });
+
+        Assert.Equal(2, store.Count);
+        Assert.Equal(2, store.LoadedFiles.Count);
+    }
+
+    [Fact]
+    public async Task UpdateLoadedFiles_can_load_a_gz_file_on_demand()
+    {
+        WriteClef("app.clef", ClefLine("normal"));
+        var gz = WriteClefGz("antigo.clef.gz", ClefLine("compactado"));
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+
+        await store.UpdateLoadedFiles(store.LoadedFiles.Append(gz).ToList());
+
+        Assert.Equal(2, store.Count);
+    }
+
+    [Fact]
+    public async Task Snapshot_is_an_isolated_copy()
+    {
+        WriteClef("a.clef", ClefLine("x"));
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+
+        var snapshot = store.Snapshot();
+        await store.UpdateLoadedFiles(Array.Empty<string>());
+
+        // A cópia continua válida mesmo depois de o store esvaziar.
+        Assert.Single(snapshot);
+        Assert.Equal(0, store.Count);
+    }
+
+    [Fact]
+    public async Task Loading_again_replaces_the_previous_content()
+    {
+        var a = WriteClef("a.clef", ClefLine("de a"));
+        var b = WriteClef("b.clef", ClefLine("de b"));
+        var store = NewStore();
+
+        await store.LoadFromFile(a);
+        await store.LoadFromFile(b);
+
+        Assert.Equal(1, store.Count);
+        Assert.Equal("de b", store.Snapshot()[0].Message);
+    }
+
+    [Fact]
+    public async Task Changed_is_raised_around_a_load()
+    {
+        WriteClef("a.clef", ClefLine("x"));
+        var store = NewStore();
+        var count = 0;
+        store.Changed += () => count++;
+
+        await store.LoadFromFolderAsync(_root);
+
+        Assert.True(count >= 2, $"esperado ao menos 2 notificações (início e fim), veio {count}");
+    }
+}

@@ -22,7 +22,10 @@ namespace ClefExplorer
             {
                 this.Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLog.Warning("Não foi possível extrair o ícone do executável", ex);
+            }
             Width = 1200;
             Height = 800;
 
@@ -43,7 +46,10 @@ namespace ClefExplorer
 
         private void BuildUi()
         {
-            var hostPage = Path.Combine(Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName), "wwwroot\\index.html");
+            // Environment.ProcessPath funciona no publish single-file, onde
+            // AppContext.BaseDirectory pode apontar para a pasta temporária de extração.
+            var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+            var hostPage = Path.Combine(exeDir, "wwwroot\\index.html");
             var absPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, hostPage);
             if (System.IO.File.Exists(absPath))
             {
@@ -73,15 +79,18 @@ namespace ClefExplorer
             e.State = CoreWebView2PermissionState.Allow;
         }
 
-        private void MainForm_FormClosed(object sender, FormClosedEventArgs e)
+        private void MainForm_FormClosed(object? sender, FormClosedEventArgs e)
         {
             try
             {
-                Task.Run(() => _blazorWebView?.Dispose()).ConfigureAwait(false);
+                // Dispose na thread de UI: o BlazorWebView é um controle do WinForms e
+                // descartá-lo em outra thread (como era feito num Task.Run fire-and-forget)
+                // é justamente o tipo de acesso cross-thread que o WinForms não suporta.
+                _blazorWebView?.Dispose();
             }
-            catch (Exception exception)
+            catch (Exception ex)
             {
-                //ignore
+                AppLog.Warning("Falha ao descartar o BlazorWebView", ex);
             }
         }
 

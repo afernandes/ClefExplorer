@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Text.Json;
 using ClefExplorer.Models;
 
@@ -7,16 +6,19 @@ namespace ClefExplorer.Services
 {
     public class SettingsService
     {
-        private readonly string _storagePath;
+        private const string FileName = "settings.json";
+
+        private readonly AppStorage _storage;
         private Settings _settings = new();
 
         public event Action? Changed;
 
-        public SettingsService()
+        /// <summary>Erro na última tentativa de leitura/gravação, ou <c>null</c> se correu bem.</summary>
+        public string? LastError { get; private set; }
+
+        public SettingsService(AppStorage storage)
         {
-            //var appFolder = AppDomain.CurrentDomain.BaseDirectory;
-            var appFolder = Directory.GetCurrentDirectory();
-            _storagePath = Path.Combine(appFolder, "settings.json");
+            _storage = storage;
             LoadSettings();
         }
 
@@ -27,28 +29,37 @@ namespace ClefExplorer.Services
             try
             {
                 var json = JsonSerializer.Serialize(_settings, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(_storagePath, json);
+                _storage.WriteText(FileName, json);
+                LastError = null;
                 Changed?.Invoke();
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore errors
+                AppLog.Error("Falha ao salvar as configurações", ex);
+                LastError = $"Não foi possível salvar as configurações: {ex.Message}";
             }
         }
 
         private void LoadSettings()
         {
-            if (File.Exists(_storagePath))
+            try
             {
-                try
-                {
-                    var json = File.ReadAllText(_storagePath);
-                    _settings = JsonSerializer.Deserialize<Settings>(json) ?? new Settings();
-                }
-                catch
-                {
-                    _settings = new Settings();
-                }
+                var json = _storage.ReadText(FileName);
+                if (json is null) return;
+
+                _settings = JsonSerializer.Deserialize<Settings>(json) ?? new Settings();
+                LastError = null;
+            }
+            catch (Exception ex)
+            {
+                // Não sobrescrever o arquivo do usuário: move para .corrupt para que a próxima
+                // gravação não apague silenciosamente o conteúdo que não conseguimos ler.
+                AppLog.Error($"Configurações inválidas em '{FileName}'", ex);
+                var quarantined = _storage.Quarantine(FileName);
+                _settings = new Settings();
+                LastError = quarantined is null
+                    ? $"Configurações inválidas foram ignoradas: {ex.Message}"
+                    : $"Configurações inválidas foram movidas para {quarantined}: {ex.Message}";
             }
         }
     }

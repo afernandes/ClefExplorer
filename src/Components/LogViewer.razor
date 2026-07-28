@@ -1,12 +1,15 @@
 @using System.Threading
 @using ClefExplorer.Models
 @using ClefExplorer.Services
+@implements IDisposable
 
 @inject LogStore Store
 @inject LogGroupService GroupService
 @inject IFilePickerService FilePicker
 @inject FileAssociationService FileAssociationService
+@inject SettingsService SettingsService
 @inject DialogService Dialog
+@inject NotificationService Notifications
 
 <div class="clef-root">
     <LogHeader @bind-TextoPesquisa="TextoPesquisa"
@@ -199,36 +202,96 @@
 
     protected override void OnInitialized()
     {
-        Store.Changed += () => InvokeAsync(() =>
-        {
-            // NÃO resetar _visibleFiles aqui: este evento também dispara durante
-            // UpdateLoadedFiles (ao (des)marcar arquivos na árvore), e zerar a
-            // seleção no meio da operação assíncrona faz a árvore recomputar os
-            // checkboxes a partir de um LoadedFiles intermediário, desmarcando o
-            // que o usuário acabou de marcar. O reset é feito só ao abrir algo novo.
-            if (Store.IsLoading)
-            {
-                _isBusy = true;
-                StateHasChanged();
-            }
-            else
-            {
-                AplicarFiltros();
-            }
-        });
-
-        GroupService.Changed += () => InvokeAsync(StateHasChanged);
+        // Handlers nomeados (não lambdas) para poderem ser desinscritos no Dispose:
+        // LogStore e LogGroupService são singletons, então um handler não removido
+        // mantém este componente vivo enquanto o app existir.
+        Store.Changed += OnStoreChanged;
+        GroupService.Changed += OnGroupsChanged;
 
         if (Store.IsLoading)
         {
             _isBusy = true;
         }
-        else if (Store.Events.Any())
+        else if (Store.Count > 0)
         {
             AplicarFiltros();
         }
 
         CheckDefaultApp();
+        ReportarErrosDeInicializacao();
+    }
+
+    /// <summary>
+    /// Os serviços de configuração são construídos pela DI antes de existir UI, então um
+    /// arquivo inválido ou uma pasta sem permissão só pode ser reportado aqui. Antes esses
+    /// erros eram engolidos e o usuário via a configuração simplesmente "sumir".
+    /// </summary>
+    private void ReportarErrosDeInicializacao()
+    {
+        if (SettingsService.LastError is { } erroConfig)
+        {
+            Notifications.Error("Configurações", erroConfig);
+        }
+
+        if (GroupService.LastError is { } erroGrupos)
+        {
+            Notifications.Error("Grupos de log", erroGrupos);
+        }
+    }
+
+    /// <summary>Avisa sobre arquivos que não puderam ser lidos no último carregamento.</summary>
+    private void ReportarFalhasDeLeitura()
+    {
+        var falhas = Store.LoadFailures;
+        if (falhas.Count == 0) return;
+
+        var resumo = falhas.Count == 1
+            ? "1 arquivo não pôde ser lido"
+            : $"{falhas.Count} arquivos não puderam ser lidos";
+
+        // Detalhar até 3 para a mensagem não virar uma parede de texto; o restante
+        // fica no log de diagnóstico do app.
+        var detalhe = string.Join("\n", falhas.Take(3).Select(f => $"{Path.GetFileName(f.Path)}: {f.Reason}"));
+        if (falhas.Count > 3)
+        {
+            detalhe += $"\n(e mais {falhas.Count - 3}; veja {AppLog.FilePath})";
+        }
+
+        Notifications.Warning(resumo, detalhe);
+    }
+
+    private void OnStoreChanged() => _ = InvokeAsync(() =>
+    {
+        // NÃO resetar _visibleFiles aqui: este evento também dispara durante
+        // UpdateLoadedFiles (ao (des)marcar arquivos na árvore), e zerar a
+        // seleção no meio da operação assíncrona faz a árvore recomputar os
+        // checkboxes a partir de um LoadedFiles intermediário, desmarcando o
+        // que o usuário acabou de marcar. O reset é feito só ao abrir algo novo.
+        if (Store.IsLoading)
+        {
+            _isBusy = true;
+            StateHasChanged();
+        }
+        else
+        {
+            ReportarFalhasDeLeitura();
+            AplicarFiltros();
+        }
+    });
+
+    private void OnGroupsChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Store.Changed -= OnStoreChanged;
+        GroupService.Changed -= OnGroupsChanged;
+
+        var cts = Interlocked.Exchange(ref _filterCts, null);
+        if (cts is not null)
+        {
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }
+            cts.Dispose();
+        }
     }
 
     private void CheckDefaultApp()
@@ -240,9 +303,10 @@
                 _showDefaultAppNotification = true;
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignora erros ao verificar associação
+            // Não é acionável pelo usuário: apenas não exibimos o aviso de app padrão.
+            AppLog.Warning("Falha ao verificar a associação de arquivos", ex);
         }
     }
 
@@ -262,61 +326,48 @@
         AplicarFiltros();
     }
 
-    private async void AplicarFiltros()
+    /// <summary>
+    /// Dispara a filtragem a partir de contextos síncronos (setters de propriedade e
+    /// handlers de evento). Descartar a Task é seguro porque <see cref="AplicarFiltrosAsync"/>
+    /// trata as próprias exceções — ao contrário de um <c>async void</c>, cuja exceção
+    /// escaparia para o contexto de sincronização e derrubaria a UI.
+    /// </summary>
+    private void AplicarFiltros() => _ = AplicarFiltrosAsync();
+
+    private async Task AplicarFiltrosAsync()
     {
-        _filterCts?.Cancel();
-        _filterCts = new CancellationTokenSource();
-        var token = _filterCts.Token;
+        // Cada invocação é dona do próprio CTS e o descarta no finally: cancelamos o
+        // anterior (sem descartá-lo, pois a invocação dele ainda pode estar lendo o token)
+        // e deixamos que aquela invocação faça o próprio descarte ao terminar.
+        var cts = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _filterCts, cts);
+        if (previous is not null)
+        {
+            try { previous.Cancel(); } catch (ObjectDisposedException) { }
+        }
+        var token = cts.Token;
 
         _isBusy = true;
         StateHasChanged();
 
         try
         {
+            var criterios = new LogFilterCriteria
+            {
+                VisibleFiles = _visibleFiles,
+                QuickLevel = _filtroRapido,
+                From = _dataInicial,
+                To = _dataFinal,
+                Search = _textoPesquisa,
+            };
+
             await Task.Run(() =>
             {
                 if (token.IsCancellationRequested) return;
 
-                // Snapshot sob lock: AplicarFiltros enumera fora do lock do Store,
+                // Snapshot sob lock: a filtragem enumera fora do lock do Store,
                 // enquanto UpdateLoadedFiles pode mutar a lista em paralelo.
-                IEnumerable<ClefEvent> fonte = Store.Snapshot();
-
-                // Filtro Arquivo
-                if (_visibleFiles != null)
-                {
-                    fonte = fonte.Where(e => e.SourceFile != null && _visibleFiles.Contains(e.SourceFile));
-                }
-
-                // Filtro Rápido
-                if (_filtroRapido == "Error")
-                    fonte = fonte.Where(e => e != null && string.Equals(e.Level, "Error", StringComparison.OrdinalIgnoreCase) || string.Equals(e.Level, "Fatal", StringComparison.OrdinalIgnoreCase));
-                else if (_filtroRapido == "Warning")
-                    fonte = fonte.Where(e => string.Equals(e.Level, "Warning", StringComparison.OrdinalIgnoreCase));
-                else if (_filtroRapido == "Information")
-                    fonte = fonte.Where(e => string.Equals(e.Level, "Information", StringComparison.OrdinalIgnoreCase));
-
-                // Filtro Data
-                if (_dataInicial.HasValue)
-                    fonte = fonte.Where(e => e.Timestamp.HasValue && e.Timestamp.Value.Date >= _dataInicial.Value.Date);
-
-                if (_dataFinal.HasValue)
-                    fonte = fonte.Where(e => e.Timestamp.HasValue && e.Timestamp.Value.Date <= _dataFinal.Value.Date);
-
-                // Pesquisa Texto
-                if (!string.IsNullOrWhiteSpace(_textoPesquisa))
-                {
-                    var b = _textoPesquisa.Trim();
-                    fonte = fonte.Where(e =>
-                        (e.Message ?? string.Empty).Contains(b, StringComparison.OrdinalIgnoreCase) ||
-                        (e.Exception ?? string.Empty).Contains(b, StringComparison.OrdinalIgnoreCase) ||
-                        (e.Properties != null && e.Properties.Any(p => p.Value.ToString().Contains(b, StringComparison.OrdinalIgnoreCase)))
-                    );
-                }
-
-                if (token.IsCancellationRequested) return;
-
-                // Materializa a lista em background
-                var result = fonte.OrderByDescending(e => e.Timestamp).ToList();
+                var result = LogFilter.Apply(Store.Snapshot(), criterios);
 
                 if (token.IsCancellationRequested) return;
 
@@ -331,14 +382,23 @@
 
             }, token);
         }
-        catch (TaskCanceledException)
+        catch (OperationCanceledException)
         {
-            // Ignora
+            // Filtragem substituída por outra mais recente — descarte esperado.
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            AppLog.Error("Falha ao aplicar os filtros", ex);
+            Notifications.Error("Não foi possível aplicar os filtros", ex.Message);
             _isBusy = false;
             StateHasChanged();
+        }
+        finally
+        {
+            // Só limpa o campo se ainda apontar para este CTS (uma invocação mais
+            // recente pode tê-lo substituído) e então descarta o próprio.
+            Interlocked.CompareExchange(ref _filterCts, null, cts);
+            cts.Dispose();
         }
     }
 
