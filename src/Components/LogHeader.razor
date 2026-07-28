@@ -42,7 +42,9 @@
 
     [Parameter] public EventCallback OnReload { get; set; }
 
-    private readonly int[] _qtdOptions = { 30, 50, 100 };
+    // Páginas grandes só passaram a fazer sentido depois que a lista virou virtualizada:
+    // antes, 1000 itens significavam 1000 nós no DOM.
+    private readonly int[] _qtdOptions = { 30, 50, 100, 250, 500, 1000 };
 
     private static string FormatQtd(int v) => $"{v} itens";
 

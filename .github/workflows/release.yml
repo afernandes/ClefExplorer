@@ -93,6 +93,7 @@ jobs:
           /p:AppxBundlePlatforms=x64
           /p:UapAppxPackageBuildMode=StoreUpload
           /p:AppxPackageSigningEnabled=false
+          /p:Version=${{ steps.ver.outputs.version }}
 
       - name: Locate upload package
         id: pkg

@@ -1,7 +1,9 @@
 @using ClefExplorer.Models
 @using ClefExplorer.Helpers
 
-<div class="clef-list">
+@* role=listbox + option: os itens são <div> por causa do layout, mas precisam ser
+   anunciados como uma lista de opções selecionáveis e alcançáveis pelo teclado. *@
+<div class="clef-list" role="listbox" aria-label="Eventos de log" aria-busy="@IsBusy.ToString().ToLowerInvariant()">
     @if (IsBusy)
     {
         <div class="clef-center">
@@ -9,29 +11,38 @@
             <span>Carregando logs...</span>
         </div>
     }
-    else if (Eventos != null && Eventos.Any())
+    else if (_itens.Count > 0)
     {
-        @foreach (var e in Eventos)
-        {
-            var ev = e;
-            var selected = ReferenceEquals(SelectedEvent, ev);
-            <div class="clef-list-item @(selected ? "is-selected" : "")" @onclick="@(() => OnSelect.InvokeAsync(ev))">
-                <div class="clef-list-item-body">
-                    <div class="clef-list-item-row">
-                        <OmniBadge Text="@ev.Level" Variant="LogLevelStyles.Variant(ev.Level)" />
-                        <span class="clef-list-item-time">@ev.Timestamp?.ToString("HH:mm:ss")</span>
-                    </div>
-                    <div class="clef-list-item-title" title="@ev.Message">@ev.Message</div>
-                    <div class="clef-list-item-meta">
-                        @if (!string.IsNullOrEmpty(ev.Exception))
-                        {
-                            <span class="clef-exception-flag"><OmniIcon Name="zap" Size="ComponentSize.Sm" /> Exception</span>
-                        }
-                        <span>@ObterResumoProps(ev)</span>
+        @* Virtualizado: só as linhas visíveis (mais um pequeno overscan) vão ao DOM.
+           Height=null porque o pai (.clef-list) já limita a altura e faz o scroll —
+           sem altura limitada o Virtualize renderizaria tudo. É o que permite páginas
+           grandes (500/1000) sem a UI travar. *@
+        <OmniVirtualize TItem="ClefEvent" Items="_itens" Height="null" ItemSize="76">
+            <ItemContent Context="ev">
+                <div class="clef-list-item @(ReferenceEquals(SelectedEvent, ev) ? "is-selected" : "")"
+                     role="option"
+                     tabindex="0"
+                     aria-selected="@ReferenceEquals(SelectedEvent, ev).ToString().ToLowerInvariant()"
+                     aria-label="@RotuloAcessivel(ev)"
+                     @onclick="@(() => OnSelect.InvokeAsync(ev))"
+                     @onkeydown="@(e => AoTeclar(e, ev))">
+                    <div class="clef-list-item-body">
+                        <div class="clef-list-item-row">
+                            <OmniBadge Text="@ev.Level" Variant="LogLevelStyles.Variant(ev.Level)" />
+                            <span class="clef-list-item-time">@ev.Timestamp?.ToString("HH:mm:ss")</span>
+                        </div>
+                        <div class="clef-list-item-title" title="@ev.Message">@ev.Message</div>
+                        <div class="clef-list-item-meta">
+                            @if (!string.IsNullOrEmpty(ev.Exception))
+                            {
+                                <span class="clef-exception-flag"><OmniIcon Name="zap" Size="ComponentSize.Sm" /> Exception</span>
+                            }
+                            <span>@ObterResumoProps(ev)</span>
+                        </div>
                     </div>
                 </div>
-            </div>
-        }
+            </ItemContent>
+        </OmniVirtualize>
     }
     else
     {
@@ -46,6 +57,35 @@
     [Parameter] public IEnumerable<ClefEvent> Eventos { get; set; } = Enumerable.Empty<ClefEvent>();
     [Parameter] public ClefEvent? SelectedEvent { get; set; }
     [Parameter] public EventCallback<ClefEvent> OnSelect { get; set; }
+
+    /// <summary>
+    /// O <c>OmniVirtualize</c> exige <c>ICollection</c>: materializa uma vez por mudança de
+    /// parâmetros, em vez de a cada render.
+    /// </summary>
+    private ICollection<ClefEvent> _itens = Array.Empty<ClefEvent>();
+
+    protected override void OnParametersSet() =>
+        _itens = Eventos as ICollection<ClefEvent> ?? Eventos?.ToList() ?? (ICollection<ClefEvent>)Array.Empty<ClefEvent>();
+
+    /// <summary>Enter/Espaço ativam o item, como num botão.</summary>
+    private async Task AoTeclar(KeyboardEventArgs e, ClefEvent ev)
+    {
+        if (e.Key is "Enter" or " ")
+        {
+            await OnSelect.InvokeAsync(ev);
+        }
+    }
+
+    /// <summary>
+    /// Nome anunciado pelo leitor de tela. Sem ele, o item seria lido como um amontoado de
+    /// textos soltos — e o nível, que visualmente é um badge colorido, se perderia.
+    /// </summary>
+    private static string RotuloAcessivel(ClefEvent e)
+    {
+        var hora = e.Timestamp?.ToString("HH:mm:ss") ?? "";
+        var excecao = string.IsNullOrEmpty(e.Exception) ? "" : ", com exceção";
+        return $"{e.Level} às {hora}: {e.Message}{excecao}";
+    }
 
     private string ObterResumoProps(ClefEvent e)
     {
