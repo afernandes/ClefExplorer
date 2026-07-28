@@ -541,6 +541,11 @@
     {
         if (_todosEventos.Count == 0) return;
 
+        // Snapshot antes do diálogo: a filtragem e o modo ao vivo substituem _todosEventos
+        // de forma assíncrona, então exportar direto do campo poderia gravar um conjunto
+        // diferente do que foi contado na mensagem de sucesso.
+        var paraExportar = _todosEventos.ToArray();
+
         var sugestao = $"clef-export-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
         var destino = await FilePicker.PickSaveFileAsync(LogExporter.DialogFilter, sugestao);
         if (destino is null) return;
@@ -548,11 +553,11 @@
         try
         {
             var formato = LogExporter.FormatFromPath(destino);
-            var conteudo = await Task.Run(() => LogExporter.Export(_todosEventos, formato));
+            var conteudo = await Task.Run(() => LogExporter.Export(paraExportar, formato));
             await File.WriteAllTextAsync(destino, conteudo);
 
             Notifications.Success(
-                $"{_todosEventos.Count} eventos exportados",
+                $"{paraExportar.Length} eventos exportados",
                 Path.GetFileName(destino));
         }
         catch (Exception ex)

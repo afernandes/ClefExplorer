@@ -65,8 +65,24 @@ namespace ClefExplorer.Services
             lock (_events) { return _events.ToArray(); }
         }
         public string? FileName => _fileName;
-        public IReadOnlyList<string> LoadedFiles => _loadedFiles;
-        public IReadOnlyList<string> AvailableFiles => _availableFiles;
+
+        /// <summary>
+        /// Arquivos atualmente carregados. Devolve uma CÓPIA sob o mesmo lock das mutações:
+        /// estas listas são alteradas em background por <see cref="LoadFromPathsAsync"/> e
+        /// <see cref="UpdateLoadedFiles"/>, enquanto a UI as enumera ao reagir a
+        /// <see cref="Changed"/> — expor a lista viva é a mesma armadilha que causou o
+        /// crash de chave duplicada na lista de eventos.
+        /// </summary>
+        public IReadOnlyList<string> LoadedFiles
+        {
+            get { lock (_events) { return _loadedFiles.ToArray(); } }
+        }
+
+        /// <summary>Arquivos encontrados nos caminhos abertos (marcados ou não). Também uma cópia.</summary>
+        public IReadOnlyList<string> AvailableFiles
+        {
+            get { lock (_events) { return _availableFiles.ToArray(); } }
+        }
 
         /// <summary>
         /// Caminhos que não puderam ser lidos no último carregamento, com o motivo.
@@ -252,9 +268,13 @@ namespace ClefExplorer.Services
 
         public async Task UpdateLoadedFiles(IEnumerable<string> newSelection)
         {
-            var newSet = new HashSet<string>(newSelection);
-            var currentSet = new HashSet<string>(_loadedFiles);
-            
+            // OrdinalIgnoreCase: no Windows os caminhos não diferenciam maiúsculas, e o
+            // comparador padrão faria "C:\Logs\a.clef" e "C:\logs\a.clef" parecerem arquivos
+            // distintos — recarregando um já carregado e nunca removendo o outro.
+            // É o mesmo comparador já usado em explicitFiles e no cache de offsets.
+            var newSet = new HashSet<string>(newSelection, StringComparer.OrdinalIgnoreCase);
+            var currentSet = new HashSet<string>(LoadedFiles, StringComparer.OrdinalIgnoreCase);
+
             var toAdd = newSet.Except(currentSet).ToList();
             var toRemove = currentSet.Except(newSet).ToList();
             
@@ -264,14 +284,18 @@ namespace ClefExplorer.Services
             ClearFailures();
             Changed?.Invoke();
             
+            // Conjunto (e não List.Contains) para a remoção também ignorar maiúsculas e
+            // não ficar O(n×m) quando há muitos arquivos.
+            var removeSet = new HashSet<string>(toRemove, StringComparer.OrdinalIgnoreCase);
+
             await Task.Run(async () => {
                  // Remove events
                  if (toRemove.Any())
                  {
                      lock(_events)
                      {
-                         _events.RemoveAll(e => e.SourceFile != null && toRemove.Contains(e.SourceFile));
-                         _loadedFiles.RemoveAll(f => toRemove.Contains(f));
+                         _events.RemoveAll(e => e.SourceFile != null && removeSet.Contains(e.SourceFile));
+                         _loadedFiles.RemoveAll(removeSet.Contains);
                      }
                  }
                  
@@ -327,8 +351,6 @@ namespace ClefExplorer.Services
              else
              {
                  await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                 // Guarda onde a leitura parou para o modo tail continuar daqui.
-                 RememberOffset(file, fs.Length);
 
                  using var sr = new StreamReader(fs);
                  var reader = new LogEventReader(sr);
@@ -342,6 +364,12 @@ namespace ClefExplorer.Services
                          eventsBag.Add(ev);
                      }
                  }
+
+                 // Offset registrado DEPOIS de ler, com a posição realmente consumida.
+                 // Guardar fs.Length antes da leitura duplicava eventos no modo tail: se o
+                 // arquivo crescesse durante o carregamento, o StreamReader consumia além
+                 // daquele comprimento e o tail relia o excedente.
+                 RememberOffset(file, fs.Position);
              }
         }
 
@@ -354,6 +382,9 @@ namespace ClefExplorer.Services
         private int _tailBusy; // 0 = livre, 1 = varredura em andamento
 
         private static readonly TimeSpan TailInterval = TimeSpan.FromSeconds(1);
+
+        /// <summary>Quanto o modo tail lê de cada arquivo por varredura (16 MB).</summary>
+        private const int MaxTailReadBytes = 16 * 1024 * 1024;
 
         /// <summary>Indica se o aplicativo está acompanhando os arquivos carregados.</summary>
         public bool TailEnabled { get; private set; }
@@ -450,9 +481,14 @@ namespace ClefExplorer.Services
             if (fs.Length < offset) offset = 0;
             if (fs.Length == offset) return resultado;
 
+            // Teto por varredura: sem ele, um arquivo que cresceu centenas de MB (ou uma
+            // rotação que zera o offset de um log gigante) tentaria alocar tudo de uma vez.
+            // O excedente entra no próximo tique, um segundo depois.
+            var pendente = Math.Min(fs.Length - offset, MaxTailReadBytes);
+
             fs.Seek(offset, SeekOrigin.Begin);
-            var buffer = new byte[fs.Length - offset];
-            var lidos = await fs.ReadAsync(buffer);
+            var buffer = new byte[(int)pendente];
+            var lidos = await fs.ReadAsync(buffer.AsMemory(0, buffer.Length));
             if (lidos <= 0) return resultado;
 
             // '\n' não aparece no meio de uma sequência UTF-8 multibyte, então cortar aqui

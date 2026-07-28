@@ -366,6 +366,38 @@ public class LogStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateLoadedFiles_compares_paths_ignoring_case()
+    {
+        // No Windows os caminhos não diferenciam maiúsculas: com o comparador padrão,
+        // reenviar a mesma seleção com outra caixa recarregaria o arquivo (duplicando
+        // eventos) e não removeria o antigo.
+        var a = WriteClef("a.clef", ClefLine("de a"));
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+        Assert.Equal(1, store.Count);
+
+        await store.UpdateLoadedFiles(new[] { a.ToUpperInvariant() });
+
+        Assert.Equal(1, store.Count);
+        Assert.Single(store.LoadedFiles);
+    }
+
+    [Fact]
+    public async Task LoadedFiles_is_a_copy_and_not_the_live_list()
+    {
+        WriteClef("a.clef", ClefLine("x"));
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+
+        var antes = store.LoadedFiles;
+        await store.UpdateLoadedFiles(Array.Empty<string>());
+
+        // A cópia obtida antes continua válida mesmo depois de o store esvaziar.
+        Assert.Single(antes);
+        Assert.Empty(store.LoadedFiles);
+    }
+
+    [Fact]
     public async Task UpdateLoadedFiles_can_load_a_gz_file_on_demand()
     {
         WriteClef("app.clef", ClefLine("normal"));
@@ -489,7 +521,7 @@ public class LogStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task Tail_is_off_by_default()
+    public void Tail_is_off_by_default()
     {
         Assert.False(NewStore().TailEnabled);
     }
@@ -509,6 +541,34 @@ public class LogStoreTests : IDisposable
 
             Assert.True(await WaitUntil(() => store.Count == 2), "o evento novo não foi captado");
             Assert.Contains(store.Snapshot(), e => e.Message == "apareceu depois");
+        }
+        finally
+        {
+            store.SetTailEnabled(false);
+        }
+    }
+
+    [Fact]
+    public async Task Tail_does_not_duplicate_lines_written_during_the_initial_load()
+    {
+        // Regressão: o offset era registrado ANTES de ler (com o comprimento de abertura).
+        // Se o arquivo crescesse durante a carga, o StreamReader consumia além daquele
+        // ponto e o tail relia o excedente, duplicando eventos.
+        var file = WriteClef("app.clef", ClefLine("a"), ClefLine("b"));
+        var store = NewStore();
+
+        // Simula o crescimento acrescentando antes de ligar o tail: a carga inicial já leu
+        // tudo até o fim, então o tail não pode trazer nada de novo.
+        File.AppendAllText(file, ClefLine("c") + Environment.NewLine);
+        await store.LoadFromFolderAsync(_root);
+        Assert.Equal(3, store.Count);
+
+        store.SetTailEnabled(true);
+        try
+        {
+            await Task.Delay(2500); // alguns tiques do tail
+
+            Assert.Equal(3, store.Count);
         }
         finally
         {
