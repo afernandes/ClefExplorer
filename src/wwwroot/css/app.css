@@ -679,3 +679,97 @@ span.omni-tree-text.clef-tree-backup { font-weight: 600; }
     outline: 2px solid var(--omni-accent);
     outline-offset: -2px;
 }
+
+/* ---- Painel de estatísticas ----------------------------------------------- */
+.clef-stats {
+    height: 100%;
+    overflow-y: auto;
+    padding: 12px;
+    background: var(--omni-bg);
+}
+
+/* Cartões fluem em colunas; os largos (timeline, exceções) ocupam a linha toda. */
+.clef-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 12px;
+    align-items: start;
+}
+
+.clef-stats-wide { grid-column: 1 / -1; }
+
+.clef-stat-numbers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-bottom: 14px;
+}
+
+.clef-stat-big { display: flex; flex-direction: column; }
+
+.clef-stat-value {
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--omni-fg);
+}
+
+.clef-stat-big.is-error .clef-stat-value {
+    color: color-mix(in oklab, var(--omni-danger) 80%, var(--omni-fg));
+}
+
+.clef-stat-label {
+    font-size: 11.5px;
+    color: var(--omni-fg-muted);
+}
+
+.clef-stat-bars { display: flex; flex-direction: column; gap: 2px; }
+
+/* Cada linha é um <button>: clicar aplica o filtro correspondente. */
+.clef-stat-row {
+    display: grid;
+    grid-template-columns: minmax(90px, 34%) 1fr auto;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 4px 6px;
+    border: 0;
+    background: transparent;
+    border-radius: var(--omni-radius);
+    cursor: pointer;
+    font: inherit;
+    color: var(--omni-fg);
+    text-align: left;
+}
+
+.clef-stat-row:hover { background: var(--omni-bg-sunken); }
+
+.clef-stat-name {
+    font-size: 12.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.clef-stat-track {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--omni-bg-sunken);
+    overflow: hidden;
+}
+
+.clef-stat-fill {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--omni-accent);
+}
+
+.clef-stat-count {
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--omni-fg-muted);
+}
+
+/* Grupo de botões do modo de visualização. */
+.clef-viewmode { display: flex; gap: 2px; }

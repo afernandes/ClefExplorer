@@ -8,6 +8,9 @@ namespace ClefExplorer.Models
 
         /// <summary>Tabela com colunas: permite ordenar, agrupar e escolher as colunas exibidas.</summary>
         Grid = 1,
+
+        /// <summary>Visão agregada do conjunto filtrado: contagens, rankings e timeline.</summary>
+        Stats = 2,
     }
 
     /// <summary>Onde o painel de detalhes aparece em relação à lista de eventos.</summary>

@@ -92,15 +92,13 @@ namespace ClefExplorer.Services
             return _preferences.DetailPanelPosition;
         }
 
-        /// <summary>Alterna entre lista e tabela e persiste a escolha.</summary>
-        public LogViewMode ToggleViewMode()
+        /// <summary>Define o modo de visualização e persiste a escolha.</summary>
+        public void SetViewMode(LogViewMode mode)
         {
-            _preferences.ViewMode = _preferences.ViewMode == LogViewMode.List
-                ? LogViewMode.Grid
-                : LogViewMode.List;
+            if (_preferences.ViewMode == mode) return;
 
+            _preferences.ViewMode = mode;
             Save();
-            return _preferences.ViewMode;
         }
 
         /// <summary>Grava quais colunas ficam visíveis no modo tabela.</summary>

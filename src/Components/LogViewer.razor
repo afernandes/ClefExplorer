@@ -66,8 +66,8 @@
                                 DetailVisible="@(_selected != null)"
                                 DetailAtBottom="@DetalheAbaixo"
                                 OnToggleDetailPosition="AlternarPosicaoDetalhe"
-                                GridMode="@ModoTabela"
-                                OnToggleViewMode="AlternarModoVisualizacao" />
+                                ViewMode="@UiPreferences.Preferences.ViewMode"
+                                OnSetViewMode="DefinirModoVisualizacao" />
 
                     <div class="clef-body">
                         @* Sem seleção: o miolo ocupa todo o espaço, SEM splitter. Manter o
@@ -113,7 +113,13 @@
 @code {
     private RenderFragment RenderEventos() => __builder =>
     {
-        if (ModoTabela)
+        if (ModoEstatisticas)
+        {
+            <LogStatsPanel Stats="@_stats"
+                           OnFilterLevel="FiltrarPorNivel"
+                           OnFilterText="FiltrarPorTexto" />
+        }
+        else if (ModoTabela)
         {
             <LogGrid Eventos="@_eventos"
                      SelectedEvent="@_selected"
@@ -528,9 +534,10 @@
                     _todosEventos = result;
                     if (_pagina > UltimaPagina) _pagina = 1;
                     AtualizarPagina();
-                    // As colunas vêm do conteúdo, então mudam quando o conjunto muda.
-                    // Só recalcula no modo tabela — na lista seria trabalho jogado fora.
+                    // Colunas e estatísticas derivam do conjunto, então mudam junto com ele.
+                    // Só recalcula no modo que as usa — nos demais seria trabalho jogado fora.
                     if (ModoTabela) DescobrirColunas();
+                    if (ModoEstatisticas) CalcularEstatisticas();
                     _isBusy = false;
                     StateHasChanged();
                 });
@@ -608,6 +615,9 @@
     private bool DetalheAbaixo => UiPreferences.Preferences.DetailPanelPosition == DetailPanelPosition.Bottom;
 
     private bool ModoTabela => UiPreferences.Preferences.ViewMode == LogViewMode.Grid;
+    private bool ModoEstatisticas => UiPreferences.Preferences.ViewMode == LogViewMode.Stats;
+
+    private LogStats _stats = new();
 
     /// <summary>
     /// Colunas visíveis na tabela. Vazio (primeira abertura) cai no conjunto padrão — o
@@ -629,11 +639,38 @@
 
     private IReadOnlyList<DiscoveredColumn> _colunasDescobertas = Array.Empty<DiscoveredColumn>();
 
-    /// <summary>Alterna entre lista e tabela, persistindo a escolha.</summary>
-    private void AlternarModoVisualizacao()
+    /// <summary>Troca o modo de visualização, persistindo a escolha.</summary>
+    private void DefinirModoVisualizacao(LogViewMode modo)
     {
-        UiPreferences.ToggleViewMode();
+        UiPreferences.SetViewMode(modo);
+
+        // Colunas e estatísticas vêm do conjunto atual; só são calculadas no modo que
+        // as usa, para não gastar trabalho à toa nos demais.
         if (ModoTabela) DescobrirColunas();
+        if (ModoEstatisticas) CalcularEstatisticas();
+    }
+
+    /// <summary>
+    /// Agrega o conjunto FILTRADO inteiro — não a página. As estatísticas precisam refletir
+    /// tudo o que o filtro selecionou, senão responderiam sobre uma amostra arbitrária.
+    /// </summary>
+    private void CalcularEstatisticas()
+    {
+        try
+        {
+            _stats = LogStatistics.Compute(_todosEventos);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("Falha ao calcular as estatísticas", ex);
+            _stats = new LogStats();
+        }
+    }
+
+    /// <summary>Clique num nível do painel: passa a filtrar só por ele.</summary>
+    private void FiltrarPorNivel(string nivel)
+    {
+        NiveisSelecionados = new HashSet<string>(new[] { nivel }, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
