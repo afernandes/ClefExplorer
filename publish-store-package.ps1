@@ -38,8 +38,9 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$Version,
+    # Sem Mandatory: omitir cai no <ClefVersion> do Directory.Build.props. Com Mandatory,
+    # o PowerShell pediria o valor no prompt e o fallback nunca seria alcançado.
+    [string]$Version = '',
 
     [string]$Platform = 'x64',
     [string]$Configuration = 'Release',
@@ -60,6 +61,18 @@ foreach ($p in @($srcProj, $pkgProj, $manifest)) {
     if (-not (Test-Path $p)) { throw "Não encontrei: $p (rode o script da raiz do repositório)." }
 }
 
+# ---------- Versão: parâmetro, ou a do Directory.Build.props ----------
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $propsPath = Join-Path $root 'Directory.Build.props'
+    if (Test-Path $propsPath) {
+        $Version = ([xml](Get-Content $propsPath)).Project.PropertyGroup.ClefVersion
+    }
+    if ([string]::IsNullOrWhiteSpace($Version)) {
+        throw "Informe -Version ou defina <ClefVersion> em Directory.Build.props."
+    }
+    Write-Host "Versão herdada do Directory.Build.props: $Version" -ForegroundColor DarkGray
+}
+
 # ---------- Normaliza a versão para x.y.z.0 ----------
 $v = $Version.Trim().TrimStart('v', 'V')
 if ($v -notmatch '^\d+\.\d+(\.\d+){0,2}$') {
@@ -72,6 +85,9 @@ if ($parts.Count -eq 4 -and $parts[3] -ne '0') {
 }
 while ($parts.Count -lt 3) { $parts += '0' }
 $fullVersion = '{0}.{1}.{2}.0' -f $parts[0], $parts[1], $parts[2]
+# 3 partes para o MSBuild: o Directory.Build.props faz $(Version).0 para chegar às 4
+# do assembly; passar 4 partes aqui produziria 5.
+$msbuildVersion = '{0}.{1}.{2}' -f $parts[0], $parts[1], $parts[2]
 Write-Host "Versão do pacote: $fullVersion" -ForegroundColor Cyan
 
 # ---------- Dica: versão já instalada/publicada ----------
@@ -154,6 +170,7 @@ try {
         /p:AppxBundlePlatforms=$Platform `
         /p:UapAppxPackageBuildMode=StoreUpload `
         /p:AppxPackageSigningEnabled=false `
+        /p:Version=$msbuildVersion `
         /v:minimal
     if ($LASTEXITCODE -ne 0) { throw "MSBuild falhou (exit $LASTEXITCODE)." }
 }

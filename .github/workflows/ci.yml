@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+  # Sem filtro de base: roda em PR para QUALQUER branch. Com "branches: [main]" os
+  # PRs empilhados (que apontam para outra branch de feature) ficavam sem CI, e o
+  # gate de testes só valia para o último PR da fila.
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:

@@ -1,0 +1,167 @@
+@using ClefExplorer.Models
+@using ClefExplorer.Helpers
+@using Omni.Blazor.Models
+
+@* Visão agregada do conjunto FILTRADO — não do arquivo inteiro. Assim as estatísticas
+   respondem ao que está em tela: filtrou por período, os números acompanham.
+
+   Tudo aqui é clicável e aplica o filtro correspondente: é o que transforma o painel
+   de "relatório" em ponto de partida da investigação. *@
+
+<div class="clef-stats">
+    @if (Stats.Total == 0)
+    {
+        <div class="clef-center">
+            <OmniEmptyState Icon="bar-chart" Title="Nada para analisar" />
+        </div>
+    }
+    else
+    {
+        <div class="clef-stats-grid">
+
+            @* --- Resumo -------------------------------------------------------- *@
+            <OmniCard Title="Resumo" Class="clef-stats-card">
+                <div class="clef-stat-numbers">
+                    <div class="clef-stat-big">
+                        <span class="clef-stat-value">@Stats.Total.ToString("N0")</span>
+                        <span class="clef-stat-label">eventos</span>
+                    </div>
+                    <div class="clef-stat-big @(Stats.ErrorCount > 0 ? "is-error" : "")">
+                        <span class="clef-stat-value">@Stats.ErrorCount.ToString("N0")</span>
+                        <span class="clef-stat-label">erros e fatais</span>
+                    </div>
+                    <div class="clef-stat-big">
+                        <span class="clef-stat-value">@PercentualErro</span>
+                        <span class="clef-stat-label">taxa de erro</span>
+                    </div>
+                </div>
+
+                <div class="clef-stat-bars">
+                    @foreach (var nivel in Stats.ByLevel)
+                    {
+                        var n = nivel;
+                        <button type="button" class="clef-stat-row" title="Filtrar por @n.Label"
+                                @onclick="@(() => OnFilterLevel.InvokeAsync(n.Key))">
+                            <OmniBadge Text="@n.Label" Variant="@LogLevelStyles.Variant(n.Key)" Size="ComponentSize.Sm" />
+                            <span class="clef-stat-track"><span class="clef-stat-fill" style="@Largura(n.Count, MaiorNivel)"></span></span>
+                            <span class="clef-stat-count">@n.Count.ToString("N0")</span>
+                        </button>
+                    }
+                </div>
+            </OmniCard>
+
+            @* --- Timeline ------------------------------------------------------ *@
+            <OmniCard Title="@($"Ao longo do tempo ({RotuloFatia})")" Class="clef-stats-card clef-stats-wide">
+                @if (Stats.Timeline.Count > 0)
+                {
+                    <OmniChart Series="@SerieTimeline"
+                               Height="180px"
+                               LegendPosition="ChartLegendPosition.Top"
+                               ColorScheme="ChartColorScheme.Semantic"
+                               AriaLabel="Eventos e erros ao longo do tempo" />
+                }
+            </OmniCard>
+
+            @* --- Rankings ------------------------------------------------------ *@
+            <OmniCard Title="Origens mais frequentes" Class="clef-stats-card">
+                @RenderRanking(Stats.TopSources, OnFilterText)
+            </OmniCard>
+
+            <OmniCard Title="Mensagens mais repetidas" Class="clef-stats-card">
+                @RenderRanking(Stats.TopMessages, OnFilterText)
+            </OmniCard>
+
+            @if (Stats.TopExceptions.Count > 0)
+            {
+                <OmniCard Title="Exceções mais frequentes" Class="clef-stats-card clef-stats-wide">
+                    @RenderRanking(Stats.TopExceptions, OnFilterText)
+                </OmniCard>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public LogStats Stats { get; set; } = new();
+
+    /// <summary>Clique num nível aplica o filtro rápido correspondente.</summary>
+    [Parameter] public EventCallback<string> OnFilterLevel { get; set; }
+
+    /// <summary>Clique numa origem/mensagem/exceção joga o texto na busca.</summary>
+    [Parameter] public EventCallback<string> OnFilterText { get; set; }
+
+    private int MaiorNivel => Stats.ByLevel.Count == 0 ? 1 : Stats.ByLevel.Max(e => e.Count);
+
+    private string PercentualErro =>
+        Stats.Total == 0 ? "0%" : (Stats.ErrorCount / (double)Stats.Total).ToString("P1");
+
+    private static string Largura(int valor, int maximo) =>
+        $"width: {(maximo <= 0 ? 0 : valor * 100.0 / maximo).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}%";
+
+    private RenderFragment RenderRanking(IReadOnlyList<StatEntry> entradas, EventCallback<string> aoClicar) => __builder =>
+    {
+        if (entradas.Count == 0)
+        {
+            <p class="clef-dialog-hint">Nada a destacar.</p>
+        }
+        else
+        {
+            var maior = entradas.Max(e => e.Count);
+            <div class="clef-stat-bars">
+                @foreach (var entrada in entradas)
+                {
+                    var e = entrada;
+                    <button type="button" class="clef-stat-row" title="@($"Filtrar por: {e.Label}")"
+                            @onclick="@(() => aoClicar.InvokeAsync(e.Key))">
+                        <span class="clef-stat-name">@e.Label</span>
+                        <span class="clef-stat-track"><span class="clef-stat-fill" style="@Largura(e.Count, maior)"></span></span>
+                        <span class="clef-stat-count">@e.Count.ToString("N0")</span>
+                    </button>
+                }
+            </div>
+        }
+    };
+
+    /// <summary>Duas séries: o volume total e, sobreposto, quanto dele é erro.</summary>
+    private IEnumerable<ChartSeries> SerieTimeline => new[]
+    {
+        new ChartSeries
+        {
+            Title = "Eventos",
+            Type = ChartSeriesType.Column,
+            Points = Stats.Timeline.Select(b => new ChartDataPoint
+            {
+                Category = b.Start.ToString(FormatoDaFatia),
+                Value = b.Total,
+            }).ToList(),
+        },
+        new ChartSeries
+        {
+            Title = "Erros",
+            Type = ChartSeriesType.Column,
+            Points = Stats.Timeline.Select(b => new ChartDataPoint
+            {
+                Category = b.Start.ToString(FormatoDaFatia),
+                Value = b.Errors,
+            }).ToList(),
+        },
+    };
+
+    /// <summary>O eixo mostra só o que distingue as fatias: hora para períodos curtos, data para longos.</summary>
+    private string FormatoDaFatia => Stats.BucketSize >= TimeSpan.FromDays(1) ? "dd/MM"
+        : Stats.BucketSize >= TimeSpan.FromHours(1) ? "dd/MM HH'h'"
+        : "HH:mm";
+
+    private string RotuloFatia
+    {
+        get
+        {
+            var b = Stats.BucketSize;
+            if (b <= TimeSpan.Zero) return "—";
+            if (b >= TimeSpan.FromDays(1)) return $"por {b.TotalDays:0.#} dia(s)";
+            if (b >= TimeSpan.FromHours(1)) return $"por {b.TotalHours:0.#} hora(s)";
+            if (b >= TimeSpan.FromMinutes(1)) return $"por {b.TotalMinutes:0.#} minuto(s)";
+            return $"por {Math.Max(1, b.TotalSeconds):0.#} segundo(s)";
+        }
+    }
+}

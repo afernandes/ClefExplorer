@@ -55,12 +55,12 @@ O app está publicado na Store (product `9MVZN1HVJ230`, gratuito) e o CI está v
 
 | # | Item | Tipo | Esforço | Status |
 |---|---|---|---|---|
-| 18 | Virtualização da lista (alternativa/complemento à paginação) | ⚡ Perf | 🟡 | ⬜ |
-| 19 | Painel de estatísticas / timeline | ✨ Feature | 🔴 | ⬜ |
-| 20 | Acessibilidade (teclado, ARIA, foco) | ♿ A11y | 🟡 | ⬜ |
-| 21 | Versionamento coerente + auto-update da versão standalone | 🧱 Débito | 🟡 | ⬜ |
-| 22 | Internacionalização (i18n) | ✨ Feature | 🔴 | ⬜ |
-| 23 | Higiene geral do código e nomenclatura | 🧱 Débito | 🟢 | 🟨 parcial (avisos `CS*` zerados) |
+| 18 | Virtualização da lista (alternativa/complemento à paginação) | ⚡ Perf | 🟡 | ✅ (+ páginas de até 1000) |
+| 19 | Painel de estatísticas / timeline | ✨ Feature | 🔴 | ✅ |
+| 20 | Acessibilidade (teclado, ARIA, foco) | ♿ A11y | 🟡 | ✅ (anel de foco não verificado na tela) |
+| 21 | Versionamento coerente + auto-update da versão standalone | 🧱 Débito | 🟡 | 🟨 versão unificada; auto-update pendente |
+| 22 | Internacionalização (i18n) | ✨ Feature | 🔴 | ⬜ (depende de decisão de alcance) |
+| 23 | Higiene geral do código e nomenclatura | 🧱 Débito | 🟢 | ✅ |
 
 ---
 

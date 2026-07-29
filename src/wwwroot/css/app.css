@@ -552,15 +552,21 @@ span.omni-tree-text.clef-tree-backup { font-weight: 600; }
     flex-direction: column;
     gap: 8px;
 }
+/* É um <button> (foco + teclado); daí o reset de aparência e o width/text-align. */
 .clef-group-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
+    width: 100%;
     padding: 8px 10px;
     border-radius: var(--omni-radius-sm);
     cursor: pointer;
     border: 1px solid transparent;
+    background: transparent;
+    color: var(--omni-fg);
+    font: inherit;
+    text-align: left;
 }
 .clef-group-item:hover { background: var(--omni-bg-sunken); }
 .clef-group-item.is-active {
@@ -607,3 +613,163 @@ span.omni-tree-text.clef-tree-backup { font-weight: 600; }
 .clef-path-list::-webkit-scrollbar-thumb:hover {
     background: var(--omni-fg-soft);
 }
+
+/* ---- Visão em tabela (OmniDataGrid) --------------------------------------- */
+.clef-grid {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--omni-bg);
+}
+
+/* Embed="true" faz o grid preencher o pai; garante o mesmo aqui. */
+.clef-grid > .omni-datagrid {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+/* Linha do evento selecionado: mesma leitura da lista. */
+.clef-grid .omni-datagrid tbody tr.is-selected {
+    background: color-mix(in oklab, var(--omni-accent) 14%, var(--omni-bg));
+}
+
+/* Barra à esquerda em erros/fatais, como na lista — cor, e não só o badge,
+   para o erro saltar mesmo com a coluna Nível oculta. */
+.clef-grid .omni-datagrid tbody tr.clef-grid-row-error td:first-child {
+    box-shadow: inset 3px 0 0 0 color-mix(in oklab, var(--omni-danger) 80%, var(--omni-fg));
+}
+
+.clef-grid .clef-grid-exc {
+    color: color-mix(in oklab, var(--omni-danger) 80%, var(--omni-fg));
+}
+
+/* Seletor de colunas da tabela (próprio, não o embutido do grid). */
+.clef-col-chooser {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.clef-col-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: var(--omni-radius);
+    font-size: 13px;
+    color: var(--omni-fg);
+    cursor: pointer;
+}
+
+.clef-col-item:hover { background: var(--omni-bg-sunken); }
+.clef-col-item input { cursor: pointer; }
+
+/* ---- Foco visível --------------------------------------------------------- */
+/* Nenhum dos elementos clicáveis próprios (clef-*) tinha indicador de foco: quem
+   navega por teclado não sabia onde estava. :focus-visible mostra o anel apenas na
+   navegação por teclado, sem poluir o clique de mouse. */
+.clef-list-item:focus-visible,
+.clef-filter:focus-visible,
+.clef-group-item:focus-visible,
+.clef-regex-toggle:focus-visible,
+.clef-col-item:focus-within {
+    outline: 2px solid var(--omni-accent);
+    outline-offset: -2px;
+}
+
+/* ---- Painel de estatísticas ----------------------------------------------- */
+.clef-stats {
+    height: 100%;
+    overflow-y: auto;
+    padding: 12px;
+    background: var(--omni-bg);
+}
+
+/* Cartões fluem em colunas; os largos (timeline, exceções) ocupam a linha toda. */
+.clef-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 12px;
+    align-items: start;
+}
+
+.clef-stats-wide { grid-column: 1 / -1; }
+
+.clef-stat-numbers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-bottom: 14px;
+}
+
+.clef-stat-big { display: flex; flex-direction: column; }
+
+.clef-stat-value {
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--omni-fg);
+}
+
+.clef-stat-big.is-error .clef-stat-value {
+    color: color-mix(in oklab, var(--omni-danger) 80%, var(--omni-fg));
+}
+
+.clef-stat-label {
+    font-size: 11.5px;
+    color: var(--omni-fg-muted);
+}
+
+.clef-stat-bars { display: flex; flex-direction: column; gap: 2px; }
+
+/* Cada linha é um <button>: clicar aplica o filtro correspondente. */
+.clef-stat-row {
+    display: grid;
+    grid-template-columns: minmax(90px, 34%) 1fr auto;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 4px 6px;
+    border: 0;
+    background: transparent;
+    border-radius: var(--omni-radius);
+    cursor: pointer;
+    font: inherit;
+    color: var(--omni-fg);
+    text-align: left;
+}
+
+.clef-stat-row:hover { background: var(--omni-bg-sunken); }
+
+.clef-stat-name {
+    font-size: 12.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.clef-stat-track {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--omni-bg-sunken);
+    overflow: hidden;
+}
+
+.clef-stat-fill {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--omni-accent);
+}
+
+.clef-stat-count {
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--omni-fg-muted);
+}
+
+/* Grupo de botões do modo de visualização. */
+.clef-viewmode { display: flex; gap: 2px; }

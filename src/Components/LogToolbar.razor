@@ -23,8 +23,40 @@
                     Disabled="@(TotalCount == 0)"
                     Title="Exporta os eventos filtrados (não apenas a página atual)"
                     OnClick="OnExport" />
-        <OmniPagination CurrentPage="CurrentPage"
-                        CurrentPageChanged="CurrentPageChanged"
+        @* Três modos exclusivos: um grupo de botões deixa claro qual está ativo, o que
+           um único botão que cicla entre três estados não conseguiria. *@
+        <div class="clef-viewmode" role="group" aria-label="Modo de visualização">
+            <OmniButton Icon="list" IconOnly="true" Size="ComponentSize.Sm"
+                        Variant="@VarianteModo(LogViewMode.List)"
+                        Title="Lista"
+                        OnClick="@(() => OnSetViewMode.InvokeAsync(LogViewMode.List))" />
+            <OmniButton Icon="grid" IconOnly="true" Size="ComponentSize.Sm"
+                        Variant="@VarianteModo(LogViewMode.Grid)"
+                        Title="Tabela (ordenar, agrupar, escolher colunas)"
+                        OnClick="@(() => OnSetViewMode.InvokeAsync(LogViewMode.Grid))" />
+            <OmniButton Icon="bar-chart" IconOnly="true" Size="ComponentSize.Sm"
+                        Variant="@VarianteModo(LogViewMode.Stats)"
+                        Title="Estatísticas do conjunto filtrado"
+                        OnClick="@(() => OnSetViewMode.InvokeAsync(LogViewMode.Stats))" />
+        </div>
+
+        @* Só faz sentido quando há um detalhe aberto para reposicionar. O ícone aponta
+           para ONDE o painel vai, e não onde ele está — a lib não tem ícones de painel,
+           e a seta remove a ambiguidade. *@
+        @if (DetailVisible)
+        {
+            <OmniButton Icon="@(DetailAtBottom ? "arrow-right" : "arrow-down")"
+                        IconOnly="true"
+                        Size="ComponentSize.Sm"
+                        Variant="ButtonVariant.Ghost"
+                        Title="@(DetailAtBottom ? "Mover o painel de detalhes para a direita" : "Mover o painel de detalhes para baixo")"
+                        OnClick="OnToggleDetailPosition" />
+        }
+        @* OmniPagination é zero-based; o app conta a partir de 1 (é o que aparece no
+           "X-Y de Z"). Sem a conversão, a página 1 era exibida como "2" e a última
+           ficava inalcançável. A tradução fica aqui, na fronteira com o componente. *@
+        <OmniPagination CurrentPage="@(CurrentPage - 1)"
+                        CurrentPageChanged="@(i => CurrentPageChanged.InvokeAsync(i + 1))"
                         TotalCount="TotalCount"
                         PageSize="PageSize"
                         Compact="true" />
@@ -42,4 +74,15 @@
     [Parameter] public EventCallback OnToggleTail { get; set; }
     [Parameter] public bool IsLoading { get; set; }
     [Parameter] public EventCallback OnCancelLoad { get; set; }
+
+    [Parameter] public LogViewMode ViewMode { get; set; } = LogViewMode.List;
+    [Parameter] public EventCallback<LogViewMode> OnSetViewMode { get; set; }
+
+    private ButtonVariant VarianteModo(LogViewMode modo) =>
+        ViewMode == modo ? ButtonVariant.Primary : ButtonVariant.Ghost;
+
+    /// <summary>Há um evento selecionado (o painel de detalhes está aberto).</summary>
+    [Parameter] public bool DetailVisible { get; set; }
+    [Parameter] public bool DetailAtBottom { get; set; }
+    [Parameter] public EventCallback OnToggleDetailPosition { get; set; }
 }

@@ -1,6 +1,7 @@
 @using System.Threading
 @using ClefExplorer.Models
 @using ClefExplorer.Services
+@using ClefExplorer.Helpers
 @implements IDisposable
 
 @inject LogStore Store
@@ -10,6 +11,7 @@
 @inject SettingsService SettingsService
 @inject DialogService Dialog
 @inject NotificationService Notifications
+@inject UiPreferencesService UiPreferences
 @inject IJSRuntime JS
 
 <div class="clef-root">
@@ -60,25 +62,33 @@
                                 TailEnabled="@Store.TailEnabled"
                                 OnToggleTail="AlternarAoVivo"
                                 IsLoading="@Store.IsLoading"
-                                OnCancelLoad="CancelarCarregamento" />
+                                OnCancelLoad="CancelarCarregamento"
+                                DetailVisible="@(_selected != null)"
+                                DetailAtBottom="@DetalheAbaixo"
+                                OnToggleDetailPosition="AlternarPosicaoDetalhe"
+                                ViewMode="@UiPreferences.Preferences.ViewMode"
+                                OnSetViewMode="DefinirModoVisualizacao" />
 
                     <div class="clef-body">
-                        @* Sem seleção: lista ocupa todo o espaço (sem splitter, evitando a
-                           race de medição do OmniSplitter aninhado no estado de 1 pane).
-                           Com seleção: splitter lista|detalhe — criado quando o pane pai já
-                           tem largura, então a medição funciona. *@
+                        @* Sem seleção: o miolo ocupa todo o espaço, SEM splitter. Manter o
+                           splitter sempre montado (com o pane do detalhe colapsado) foi
+                           tentado e reintroduz a race de medição: o splitter aninhado mede
+                           0px e o conteúdo some.
+
+                           O @key na orientação: o splitter mede e fixa os tamanhos dos panes
+                           na inicialização, então reaproveitar a instância deixaria as
+                           medidas da disposição anterior aplicadas na nova. *@
                         @if (_selected != null)
                         {
-                            <OmniSplitter Orientation="Orientation.Horizontal" Variant="SplitterVariant.Line">
-                                <OmniSplitterPane Min="320px">
+                            <OmniSplitter @key="DetalheAbaixo"
+                                          Orientation="@(DetalheAbaixo ? Orientation.Vertical : Orientation.Horizontal)"
+                                          Variant="SplitterVariant.Line">
+                                <OmniSplitterPane Min="@(DetalheAbaixo ? "120px" : "320px")">
                                     <div class="clef-pane">
-                                        <LogList IsBusy="@_isBusy"
-                                                 Eventos="@_eventos"
-                                                 SelectedEvent="@_selected"
-                                                 OnSelect="Select" />
+                                        @RenderEventos()
                                     </div>
                                 </OmniSplitterPane>
-                                <OmniSplitterPane Size="45%" Min="320px">
+                                <OmniSplitterPane Size="45%" Min="@(DetalheAbaixo ? "140px" : "320px")">
                                     <div class="clef-pane">
                                         <LogDetails SelectedEvent="@_selected" OnClose="CloseDetail" OnFilter="FiltrarPorTexto" />
                                     </div>
@@ -88,10 +98,7 @@
                         else
                         {
                             <div class="clef-pane">
-                                <LogList IsBusy="@_isBusy"
-                                         Eventos="@_eventos"
-                                         SelectedEvent="@_selected"
-                                         OnSelect="Select" />
+                                @RenderEventos()
                             </div>
                         }
                     </div>
@@ -101,7 +108,35 @@
     </div>
 </div>
 
+@* Lista ou tabela conforme a preferência — o resto do layout (splitter, detalhe) é o
+   mesmo nos dois modos, então só o miolo troca. *@
 @code {
+    private RenderFragment RenderEventos() => __builder =>
+    {
+        if (ModoEstatisticas)
+        {
+            <LogStatsPanel Stats="@_stats"
+                           OnFilterLevel="FiltrarPorNivel"
+                           OnFilterText="FiltrarPorTexto" />
+        }
+        else if (ModoTabela)
+        {
+            <LogGrid Eventos="@_eventos"
+                     SelectedEvent="@_selected"
+                     OnSelect="Select"
+                     Colunas="@_colunasDescobertas"
+                     VisibleColumns="@ColunasVisiveis"
+                     VisibleColumnsChanged="SalvarColunasVisiveis" />
+        }
+        else
+        {
+            <LogList IsBusy="@_isBusy"
+                     Eventos="@_eventos"
+                     SelectedEvent="@_selected"
+                     OnSelect="Select" />
+        }
+    };
+
     private ClefEvent? _selected;
     private bool _isBusy;
     private List<ClefEvent> _todosEventos = new();
@@ -499,6 +534,10 @@
                     _todosEventos = result;
                     if (_pagina > UltimaPagina) _pagina = 1;
                     AtualizarPagina();
+                    // Colunas e estatísticas derivam do conjunto, então mudam junto com ele.
+                    // Só recalcula no modo que as usa — nos demais seria trabalho jogado fora.
+                    if (ModoTabela) DescobrirColunas();
+                    if (ModoEstatisticas) CalcularEstatisticas();
                     _isBusy = false;
                     StateHasChanged();
                 });
@@ -571,6 +610,92 @@
             StateHasChanged();
         }
     }
+
+    /// <summary>Painel de detalhes abaixo da lista (em vez de à direita).</summary>
+    private bool DetalheAbaixo => UiPreferences.Preferences.DetailPanelPosition == DetailPanelPosition.Bottom;
+
+    private bool ModoTabela => UiPreferences.Preferences.ViewMode == LogViewMode.Grid;
+    private bool ModoEstatisticas => UiPreferences.Preferences.ViewMode == LogViewMode.Stats;
+
+    private LogStats _stats = new();
+
+    /// <summary>
+    /// Colunas visíveis na tabela. Vazio (primeira abertura) cai no conjunto padrão — o
+    /// usuário nunca vê uma tabela sem colunas.
+    /// </summary>
+    private HashSet<string> ColunasVisiveis
+    {
+        get
+        {
+            var salvas = UiPreferences.Preferences.GridVisibleColumns;
+            return new HashSet<string>(
+                salvas.Count > 0 ? salvas : LogGridColumns.Defaults,
+                StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private void SalvarColunasVisiveis(HashSet<string> colunas) =>
+        UiPreferences.SetGridVisibleColumns(colunas);
+
+    private IReadOnlyList<DiscoveredColumn> _colunasDescobertas = Array.Empty<DiscoveredColumn>();
+
+    /// <summary>Troca o modo de visualização, persistindo a escolha.</summary>
+    private void DefinirModoVisualizacao(LogViewMode modo)
+    {
+        UiPreferences.SetViewMode(modo);
+
+        // Colunas e estatísticas vêm do conjunto atual; só são calculadas no modo que
+        // as usa, para não gastar trabalho à toa nos demais.
+        if (ModoTabela) DescobrirColunas();
+        if (ModoEstatisticas) CalcularEstatisticas();
+    }
+
+    /// <summary>
+    /// Agrega o conjunto FILTRADO inteiro — não a página. As estatísticas precisam refletir
+    /// tudo o que o filtro selecionou, senão responderiam sobre uma amostra arbitrária.
+    /// </summary>
+    private void CalcularEstatisticas()
+    {
+        try
+        {
+            _stats = LogStatistics.Compute(_todosEventos);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("Falha ao calcular as estatísticas", ex);
+            _stats = new LogStats();
+        }
+    }
+
+    /// <summary>Clique num nível do painel: passa a filtrar só por ele.</summary>
+    private void FiltrarPorNivel(string nivel)
+    {
+        NiveisSelecionados = new HashSet<string>(new[] { nivel }, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Deriva as colunas de propriedade do conteúdo carregado. Roda sobre o resultado
+    /// filtrado inteiro (não a página), para uma propriedade que só aparece em eventos de
+    /// outras páginas não ficar de fora.
+    /// </summary>
+    private void DescobrirColunas()
+    {
+        try
+        {
+            _colunasDescobertas = LogColumnDiscovery.Discover(_todosEventos);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warning("Falha ao descobrir colunas a partir do conteúdo dos logs", ex);
+            _colunasDescobertas = Array.Empty<DiscoveredColumn>();
+        }
+    }
+
+    /// <summary>
+    /// Alterna entre detalhe à direita e abaixo. À direita funciona melhor em telas largas;
+    /// abaixo, para stack traces longos e telas estreitas. A escolha é persistida.
+    /// </summary>
+    private void AlternarPosicaoDetalhe() => UiPreferences.ToggleDetailPanelPosition();
 
     /// <summary>Interrompe o carregamento em andamento, preservando o conteúdo anterior.</summary>
     private void CancelarCarregamento()
