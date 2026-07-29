@@ -259,6 +259,26 @@ public class LogStatisticsTests
 
     // --- Vazio ---------------------------------------------------------------------
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void An_invalid_bucket_count_fails_explicitly(int buckets)
+    {
+        // Sem a validação isto viraria DivideByZeroException lá dentro (ou um índice
+        // negativo), bem longe da causa.
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => LogStatistics.Compute(new[] { Event() }, buckets: buckets));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void An_invalid_top_count_fails_explicitly(int topCount)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => LogStatistics.Compute(new[] { Event() }, topCount: topCount));
+    }
+
     [Fact]
     public void An_empty_set_yields_empty_stats_without_throwing()
     {

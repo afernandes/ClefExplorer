@@ -18,10 +18,16 @@
   <PropertyGroup>
     <ClefVersion>1.1.0</ClefVersion>
 
+    <!-- Ignorado quando a build recebe /p:Version=... (propriedade global vence), que é
+         como o release aplica a versão da tag. -->
     <Version>$(ClefVersion)</Version>
-    <!-- A Store reserva a 4ª parte (revisão) e só aceita 0. -->
-    <FileVersion>$(ClefVersion).0</FileVersion>
-    <AssemblyVersion>$(ClefVersion).0</AssemblyVersion>
+
+    <!-- Derivam de $(Version), e NÃO de $(ClefVersion): senão um /p:Version=2.0.0 mudaria
+         só o pacote e o assembly continuaria na versão do arquivo — exatamente a
+         divergência que esta fonte única existe para evitar.
+         A Store reserva a 4ª parte (revisão) e só aceita 0. -->
+    <FileVersion>$(Version).0</FileVersion>
+    <AssemblyVersion>$(Version).0</AssemblyVersion>
   </PropertyGroup>
 
 </Project>

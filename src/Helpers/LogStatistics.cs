@@ -55,6 +55,11 @@ namespace ClefExplorer.Helpers
         public static LogStats Compute(IReadOnlyList<ClefEvent> events, int topCount = DefaultTopCount, int buckets = DefaultBuckets)
         {
             ArgumentNullException.ThrowIfNull(events);
+            // buckets = 0 dividiria por zero em MontarTimeline e criaria um vetor vazio,
+            // e um topCount não positivo devolveria rankings sempre vazios. Falhar aqui é
+            // mais claro do que a exceção que apareceria lá dentro.
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(topCount);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(buckets);
 
             if (events.Count == 0) return new LogStats();
 

@@ -38,7 +38,8 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
+    # Sem Mandatory: omitir cai no <ClefVersion> do Directory.Build.props. Com Mandatory,
+    # o PowerShell pediria o valor no prompt e o fallback nunca seria alcançado.
     [string]$Version = '',
 
     [string]$Platform = 'x64',
@@ -84,6 +85,9 @@ if ($parts.Count -eq 4 -and $parts[3] -ne '0') {
 }
 while ($parts.Count -lt 3) { $parts += '0' }
 $fullVersion = '{0}.{1}.{2}.0' -f $parts[0], $parts[1], $parts[2]
+# 3 partes para o MSBuild: o Directory.Build.props faz $(Version).0 para chegar às 4
+# do assembly; passar 4 partes aqui produziria 5.
+$msbuildVersion = '{0}.{1}.{2}' -f $parts[0], $parts[1], $parts[2]
 Write-Host "Versão do pacote: $fullVersion" -ForegroundColor Cyan
 
 # ---------- Dica: versão já instalada/publicada ----------
@@ -166,6 +170,7 @@ try {
         /p:AppxBundlePlatforms=$Platform `
         /p:UapAppxPackageBuildMode=StoreUpload `
         /p:AppxPackageSigningEnabled=false `
+        /p:Version=$msbuildVersion `
         /v:minimal
     if ($LASTEXITCODE -ne 0) { throw "MSBuild falhou (exit $LASTEXITCODE)." }
 }

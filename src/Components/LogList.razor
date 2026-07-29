@@ -17,7 +17,8 @@
            Height=null porque o pai (.clef-list) já limita a altura e faz o scroll —
            sem altura limitada o Virtualize renderizaria tudo. É o que permite páginas
            grandes (500/1000) sem a UI travar. *@
-        <OmniVirtualize TItem="ClefEvent" Items="_itens" Height="null" ItemSize="76">
+        @* Height="@null" e não Height="null": o segundo passaria a STRING "null". *@
+        <OmniVirtualize TItem="ClefEvent" Items="_itens" Height="@null" ItemSize="76">
             <ItemContent Context="ev">
                 <div class="clef-list-item @(ReferenceEquals(SelectedEvent, ev) ? "is-selected" : "")"
                      role="option"
