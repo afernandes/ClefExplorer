@@ -39,7 +39,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$Version,
+    [string]$Version = '',
 
     [string]$Platform = 'x64',
     [string]$Configuration = 'Release',
@@ -58,6 +58,18 @@ $appPackages = Join-Path $root 'ClefExplorer.Package\AppPackages'
 
 foreach ($p in @($srcProj, $pkgProj, $manifest)) {
     if (-not (Test-Path $p)) { throw "Não encontrei: $p (rode o script da raiz do repositório)." }
+}
+
+# ---------- Versão: parâmetro, ou a do Directory.Build.props ----------
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $propsPath = Join-Path $root 'Directory.Build.props'
+    if (Test-Path $propsPath) {
+        $Version = ([xml](Get-Content $propsPath)).Project.PropertyGroup.ClefVersion
+    }
+    if ([string]::IsNullOrWhiteSpace($Version)) {
+        throw "Informe -Version ou defina <ClefVersion> em Directory.Build.props."
+    }
+    Write-Host "Versão herdada do Directory.Build.props: $Version" -ForegroundColor DarkGray
 }
 
 # ---------- Normaliza a versão para x.y.z.0 ----------

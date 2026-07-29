@@ -1,0 +1,27 @@
+<Project>
+
+  <!--
+    Fonte única da versão do produto.
+
+    Antes o número vivia solto no ClefExplorer.csproj e ficou em 1.0.0 enquanto a Store
+    já estava em 1.0.2 — o título da janela, que lê a versão do assembly, mostrava um
+    número diferente do publicado.
+
+    Quem consome:
+      - ClefExplorer.csproj          → Version/FileVersion/AssemblyVersion (título da janela);
+      - publish-store-package.ps1    → padrão quando -Version não é informado;
+      - .github/workflows/release.yml → sobrescreve com a versão da tag (a tag manda no release).
+
+    A <Identity Version> do Package.appxmanifest NÃO é lida daqui: é XML carimbado em
+    tempo de empacotamento pelo script e pelo workflow, ambos a partir deste valor.
+  -->
+  <PropertyGroup>
+    <ClefVersion>1.1.0</ClefVersion>
+
+    <Version>$(ClefVersion)</Version>
+    <!-- A Store reserva a 4ª parte (revisão) e só aceita 0. -->
+    <FileVersion>$(ClefVersion).0</FileVersion>
+    <AssemblyVersion>$(ClefVersion).0</AssemblyVersion>
+  </PropertyGroup>
+
+</Project>

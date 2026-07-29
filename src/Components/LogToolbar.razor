@@ -23,8 +23,30 @@
                     Disabled="@(TotalCount == 0)"
                     Title="Exporta os eventos filtrados (não apenas a página atual)"
                     OnClick="OnExport" />
-        <OmniPagination CurrentPage="CurrentPage"
-                        CurrentPageChanged="CurrentPageChanged"
+        <OmniButton Icon="@(GridMode ? "list" : "grid")"
+                    IconOnly="true"
+                    Size="ComponentSize.Sm"
+                    Variant="@(GridMode ? ButtonVariant.Primary : ButtonVariant.Ghost)"
+                    Title="@(GridMode ? "Voltar para a lista" : "Exibir como tabela (ordenar, agrupar, escolher colunas)")"
+                    OnClick="OnToggleViewMode" />
+
+        @* Só faz sentido quando há um detalhe aberto para reposicionar. O ícone aponta
+           para ONDE o painel vai, e não onde ele está — a lib não tem ícones de painel,
+           e a seta remove a ambiguidade. *@
+        @if (DetailVisible)
+        {
+            <OmniButton Icon="@(DetailAtBottom ? "arrow-right" : "arrow-down")"
+                        IconOnly="true"
+                        Size="ComponentSize.Sm"
+                        Variant="ButtonVariant.Ghost"
+                        Title="@(DetailAtBottom ? "Mover o painel de detalhes para a direita" : "Mover o painel de detalhes para baixo")"
+                        OnClick="OnToggleDetailPosition" />
+        }
+        @* OmniPagination é zero-based; o app conta a partir de 1 (é o que aparece no
+           "X-Y de Z"). Sem a conversão, a página 1 era exibida como "2" e a última
+           ficava inalcançável. A tradução fica aqui, na fronteira com o componente. *@
+        <OmniPagination CurrentPage="@(CurrentPage - 1)"
+                        CurrentPageChanged="@(i => CurrentPageChanged.InvokeAsync(i + 1))"
                         TotalCount="TotalCount"
                         PageSize="PageSize"
                         Compact="true" />
@@ -42,4 +64,13 @@
     [Parameter] public EventCallback OnToggleTail { get; set; }
     [Parameter] public bool IsLoading { get; set; }
     [Parameter] public EventCallback OnCancelLoad { get; set; }
+
+    /// <summary>Exibindo em tabela (em vez da lista).</summary>
+    [Parameter] public bool GridMode { get; set; }
+    [Parameter] public EventCallback OnToggleViewMode { get; set; }
+
+    /// <summary>Há um evento selecionado (o painel de detalhes está aberto).</summary>
+    [Parameter] public bool DetailVisible { get; set; }
+    [Parameter] public bool DetailAtBottom { get; set; }
+    [Parameter] public EventCallback OnToggleDetailPosition { get; set; }
 }

@@ -1,0 +1,177 @@
+@using ClefExplorer.Models
+@using ClefExplorer.Helpers
+
+@* Visão em tabela dos eventos: ordenar, agrupar (arrastando a coluna para a faixa
+   acima), filtrar por coluna e redimensionar.
+
+   Além das colunas fixas, as colunas de propriedade são DESCOBERTAS a partir do
+   conteúdo dos logs carregados — cada aplicação emite um conjunto próprio
+   (SourceContext, RequestId, MachineName…), então fixá-las na mão não funcionaria.
+
+   O seletor de colunas é NOSSO, e não o embutido (AllowColumnVisibility): a coluna
+   aplica a visibilidade no próprio OnInitialized, então toda vez que o grid é
+   recriado — o que acontece ao abrir/fechar o painel de detalhes, já que o layout
+   troca de splitter — as escolhas do menu interno se perdiam. Mantendo o conjunto
+   aqui, ele sobrevive à recriação e ainda é persistido entre execuções. *@
+
+<div class="clef-grid">
+    <OmniDataGrid TItem="ClefEvent"
+                  Data="@Eventos"
+                  Virtualize="true"
+                  Height="100%"
+                  AllowSorting="true"
+                  AllowGrouping="true"
+                  AllowColumnResize="true"
+                  AllowColumnVisibility="false"
+                  AllowColumnFilter="true"
+                  HideGroupedColumn="true"
+                  GroupPanelText="Arraste uma coluna aqui para agrupar"
+                  EmptyText="Nenhum registro encontrado"
+                  RowClass="@LinhaCss"
+                  OnRowClick="OnSelect">
+        <ToolbarContent>
+            <OmniPopover Open="_colunasOpen" OpenChanged="@(v => _colunasOpen = v)" ShowArrow="false" Offset="4" Width="240px">
+                <Trigger>
+                    <OmniButton Text="Colunas" Icon="sliders" Size="ComponentSize.Sm" Variant="ButtonVariant.Ghost" />
+                </Trigger>
+                <ChildContent>
+                    <div class="clef-col-chooser">
+                        @foreach (var col in TodasAsColunas)
+                        {
+                            var c = col;
+                            <label class="clef-col-item">
+                                <input type="checkbox"
+                                       checked="@VisibleColumns.Contains(c.Key)"
+                                       @onchange="@(e => Alternar(c.Key, (bool?)e.Value == true))" />
+                                <span>@c.Title</span>
+                            </label>
+                        }
+                    </div>
+                </ChildContent>
+            </OmniPopover>
+        </ToolbarContent>
+
+        <Columns>
+            <OmniDataGridColumn TItem="ClefEvent"
+                                Title="Data/hora"
+                                PropertyName="Timestamp"
+                                Property="@(e => e.Timestamp ?? default)"
+                                TextSelector="@(e => e.Timestamp?.ToString("dd/MM/yyyy HH:mm:ss.fff") ?? "")"
+                                FilterType="ColumnFilterType.Date"
+                                Filterable="true"
+                                Visible="@VisibleColumns.Contains(LogGridColumns.Timestamp)"
+                                Width="165px" />
+
+            <OmniDataGridColumn TItem="ClefEvent"
+                                Title="Nível"
+                                PropertyName="Level"
+                                Property="@(e => e.Level ?? "")"
+                                Groupable="true"
+                                Filterable="true"
+                                Visible="@VisibleColumns.Contains(LogGridColumns.Level)"
+                                Width="120px">
+                <Template Context="ev">
+                    <OmniBadge Variant="@LogLevelStyles.Variant(ev.Level)" Text="@ev.Level" Size="ComponentSize.Sm" />
+                </Template>
+            </OmniDataGridColumn>
+
+            <OmniDataGridColumn TItem="ClefEvent"
+                                Title="Mensagem"
+                                PropertyName="Message"
+                                Property="@(e => e.Message ?? "")"
+                                Filterable="true"
+                                Visible="@VisibleColumns.Contains(LogGridColumns.Message)" />
+
+            @* Só o nome do arquivo na célula; o caminho completo fica no title. *@
+            <OmniDataGridColumn TItem="ClefEvent"
+                                Title="Arquivo"
+                                PropertyName="SourceFile"
+                                Property="@(e => NomeArquivo(e))"
+                                Groupable="true"
+                                Filterable="true"
+                                Visible="@VisibleColumns.Contains(LogGridColumns.SourceFile)"
+                                Width="180px">
+                <Template Context="ev">
+                    <span title="@ev.SourceFile">@NomeArquivo(ev)</span>
+                </Template>
+            </OmniDataGridColumn>
+
+            <OmniDataGridColumn TItem="ClefEvent"
+                                Title="Exceção"
+                                PropertyName="Exception"
+                                Property="@(e => string.IsNullOrEmpty(e.Exception) ? "" : "sim")"
+                                Groupable="true"
+                                Visible="@VisibleColumns.Contains(LogGridColumns.Exception)"
+                                Width="90px">
+                <Template Context="ev">
+                    @if (!string.IsNullOrEmpty(ev.Exception))
+                    {
+                        <OmniIcon Name="zap" Size="ComponentSize.Sm" Class="clef-grid-exc" />
+                    }
+                </Template>
+            </OmniDataGridColumn>
+
+            @* Colunas derivadas do conteúdo dos logs carregados. *@
+            @foreach (var coluna in Colunas)
+            {
+                var c = coluna;
+                <OmniDataGridColumn TItem="ClefEvent"
+                                    Title="@c.Title"
+                                    PropertyName="@c.Key"
+                                    Property="@(e => LogColumnDiscovery.FormatValue(e, c.Key))"
+                                    Groupable="true"
+                                    Filterable="true"
+                                    Visible="@VisibleColumns.Contains(c.Key)"
+                                    Width="160px" />
+            }
+        </Columns>
+    </OmniDataGrid>
+</div>
+
+@code {
+    [Parameter] public IReadOnlyList<ClefEvent> Eventos { get; set; } = Array.Empty<ClefEvent>();
+    [Parameter] public ClefEvent? SelectedEvent { get; set; }
+    [Parameter] public EventCallback<ClefEvent> OnSelect { get; set; }
+
+    /// <summary>Colunas descobertas no conteúdo dos logs carregados.</summary>
+    [Parameter] public IReadOnlyList<DiscoveredColumn> Colunas { get; set; } = Array.Empty<DiscoveredColumn>();
+
+    /// <summary>Chaves das colunas visíveis (fixas e descobertas).</summary>
+    [Parameter] public HashSet<string> VisibleColumns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    [Parameter] public EventCallback<HashSet<string>> VisibleColumnsChanged { get; set; }
+
+    private bool _colunasOpen;
+
+    /// <summary>Fixas primeiro, depois as descobertas — a mesma ordem da tabela.</summary>
+    private IEnumerable<(string Key, string Title)> TodasAsColunas =>
+        LogGridColumns.Fixed.Concat(Colunas.Select(c => (c.Key, c.Title)));
+
+    private async Task Alternar(string key, bool visivel)
+    {
+        var novo = new HashSet<string>(VisibleColumns, StringComparer.OrdinalIgnoreCase);
+        if (visivel) novo.Add(key); else novo.Remove(key);
+
+        VisibleColumns = novo;
+        await VisibleColumnsChanged.InvokeAsync(novo);
+    }
+
+    private static string NomeArquivo(ClefEvent e) =>
+        string.IsNullOrEmpty(e.SourceFile) ? string.Empty : Path.GetFileName(e.SourceFile);
+
+    /// <summary>Destaca a linha selecionada e as de erro, como na lista.</summary>
+    private string LinhaCss(ClefEvent e)
+    {
+        var classes = new List<string>(2);
+
+        if (ReferenceEquals(e, SelectedEvent)) classes.Add("is-selected");
+
+        if (string.Equals(e.Level, "Error", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(e.Level, "Fatal", StringComparison.OrdinalIgnoreCase))
+        {
+            classes.Add("clef-grid-row-error");
+        }
+
+        return string.Join(' ', classes);
+    }
+}
