@@ -30,10 +30,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Pacote gerado LOCALMENTE (ver /NuGet.config): a 0.4.0 publicada achata a árvore de
-         grupos inteira de uma vez e congela ao agrupar um log grande. Volta para uma versão
-         do nuget.org assim que a 0.5.0 sair. -->
-    <PackageReference Include="AndersonN.Omni.Blazor" Version="0.4.1-alpha.local.1" />
+    <!-- Mínimo 0.5.0: a 0.4.0 achatava a árvore de grupos inteira de uma vez e congelava
+         ao agrupar um log grande. A 0.5.0 virtualiza o modo agrupado e traz o
+         GroupHierarchy de data que a coluna Data/hora usa. -->
+    <PackageReference Include="AndersonN.Omni.Blazor" Version="0.5.0" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebView.WindowsForms" Version="10.0.90" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
     <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.10" />
