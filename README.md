@@ -49,6 +49,15 @@ As versões estão disponíveis neste repositório do GitHub junto com a Windows
 
 ## 🔧 Instalação e Execução
 
+> **Dependência local temporária.** O `NuGet.config` da raiz adiciona uma fonte de pacotes
+> apontando para `..\Omni\Omni.Blazor\artifacts`: o app consome uma build local da
+> **Omni.Blazor** (`0.4.1-alpha.local.1`) enquanto a correção que virtualiza o modo agrupado
+> do grid — sem ela, agrupar um log grande congela a aplicação — não é publicada no nuget.org.
+> Para compilar **sem** o repositório da biblioteca clonado ao lado, apague o `NuGet.config` e
+> volte o `PackageReference` de `AndersonN.Omni.Blazor` para `0.4.0` (compila, mas o
+> agrupamento volta a travar em logs grandes). O arquivo sai daqui quando a `0.5.0` for
+> publicada. O próprio `NuGet.config` detalha como gerar o pacote local.
+
 1. **Clonar o repositório:**
    ```bash
    git clone https://github.com/afernandes/ClefExplorer.git

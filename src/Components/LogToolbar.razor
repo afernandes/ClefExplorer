@@ -1,8 +1,38 @@
 <div class="clef-toolbar">
-    <span class="clef-toolbar-info">@Subtitulo</span>
+    <div class="clef-toolbar-status">
+        <span class="clef-toolbar-info">@Subtitulo</span>
+
+        @* Filtrar/buscar roda em segundo plano, então a lista anterior continua legível —
+           mas uma busca textual em milhões de eventos passa de um segundo e, sem este
+           aviso, a tela parecia simplesmente ignorar o que foi digitado. Só aparece
+           depois do limiar de demora: abaixo dele piscaria a cada tecla. *@
+        @if (IsFiltering)
+        {
+            <span class="clef-toolbar-filtering" role="status">
+                <OmniSpinner Size="ComponentSize.Sm" />
+                <span class="clef-toolbar-info">Filtrando…</span>
+            </span>
+            <OmniButton Text="Cancelar"
+                        Icon="x"
+                        Size="ComponentSize.Sm"
+                        Variant="ButtonVariant.Ghost"
+                        Title="Interrompe a filtragem e mantém o resultado anterior na tela"
+                        OnClick="OnCancelFilter" />
+        }
+    </div>
     <div class="clef-toolbar-actions">
         @if (IsLoading)
         {
+            @if (!string.IsNullOrWhiteSpace(LoadProgressText))
+            {
+                <span class="clef-toolbar-info" role="status">@LoadProgressText</span>
+            }
+            @* Barra só quando há uma fração confiável: uma barra que anda em saltos e
+               crava 95% com o arquivo maior ainda por ler mente mais do que o texto. *@
+            @if (ProgressoCarga is { } fracao)
+            {
+                <OmniProgress Value="@(fracao * 100)" Size="ComponentSize.Sm" Class="clef-toolbar-progress" />
+            }
             <OmniButton Text="Cancelar"
                         Icon="x"
                         Size="ComponentSize.Sm"
@@ -16,13 +46,30 @@
                     Variant="@(TailEnabled ? ButtonVariant.Primary : ButtonVariant.Ghost)"
                     Title="Acompanha os arquivos carregados e mostra os novos eventos automaticamente"
                     OnClick="OnToggleTail" />
-        <OmniButton Text="Exportar"
-                    Icon="download"
-                    Size="ComponentSize.Sm"
-                    Variant="ButtonVariant.Ghost"
-                    Disabled="@(TotalCount == 0)"
-                    Title="Exporta os eventos filtrados (não apenas a página atual)"
-                    OnClick="OnExport" />
+        @if (IsExporting)
+        {
+            <span class="clef-toolbar-info" role="status">@ExportProgressText</span>
+            @* Aqui o total é conhecido de antemão (o conjunto filtrado já está na mão),
+               então a barra é honesta — ao contrário da carga. *@
+            <OmniProgress Value="@ExportProcessados" Max="@Math.Max(1, ExportTotal)"
+                          Size="ComponentSize.Sm" Class="clef-toolbar-progress" />
+            <OmniButton Text="Cancelar exportação"
+                        Icon="x"
+                        Size="ComponentSize.Sm"
+                        Variant="ButtonVariant.Danger"
+                        Title="Interrompe a exportação e preserva o arquivo de destino anterior"
+                        OnClick="OnCancelExport" />
+        }
+        else
+        {
+            <OmniButton Text="Exportar"
+                        Icon="download"
+                        Size="ComponentSize.Sm"
+                        Variant="ButtonVariant.Ghost"
+                        Disabled="@(TotalCount == 0)"
+                        Title="Exporta os eventos filtrados (não apenas a página atual)"
+                        OnClick="OnExport" />
+        }
         @* Três modos exclusivos: um grupo de botões deixa claro qual está ativo, o que
            um único botão que cicla entre três estados não conseguiria. *@
         <div class="clef-viewmode" role="group" aria-label="Modo de visualização">
@@ -52,28 +99,41 @@
                         Title="@(DetailAtBottom ? "Mover o painel de detalhes para a direita" : "Mover o painel de detalhes para baixo")"
                         OnClick="OnToggleDetailPosition" />
         }
-        @* OmniPagination é zero-based; o app conta a partir de 1 (é o que aparece no
-           "X-Y de Z"). Sem a conversão, a página 1 era exibida como "2" e a última
-           ficava inalcançável. A tradução fica aqui, na fronteira com o componente. *@
-        <OmniPagination CurrentPage="@(CurrentPage - 1)"
-                        CurrentPageChanged="@(i => CurrentPageChanged.InvokeAsync(i + 1))"
-                        TotalCount="TotalCount"
-                        PageSize="PageSize"
-                        Compact="true" />
     </div>
 </div>
 
 @code {
-    [Parameter] public string Subtitulo { get; set; } = "0 de 0";
-    [Parameter] public int CurrentPage { get; set; }
-    [Parameter] public EventCallback<int> CurrentPageChanged { get; set; }
+    [Parameter] public string Subtitulo { get; set; } = string.Empty;
+
+    /// <summary>Eventos no conjunto filtrado — só para desabilitar a exportação vazia.</summary>
     [Parameter] public int TotalCount { get; set; }
-    [Parameter] public int PageSize { get; set; } = 50;
     [Parameter] public EventCallback OnExport { get; set; }
+    [Parameter] public bool IsExporting { get; set; }
+    [Parameter] public string ExportProgressText { get; set; } = string.Empty;
+
+    /// <summary>Eventos já gravados e total a gravar — a barra determinada da exportação.</summary>
+    [Parameter] public int ExportProcessados { get; set; }
+    [Parameter] public int ExportTotal { get; set; }
+
+    [Parameter] public EventCallback OnCancelExport { get; set; }
     [Parameter] public bool TailEnabled { get; set; }
     [Parameter] public EventCallback OnToggleTail { get; set; }
     [Parameter] public bool IsLoading { get; set; }
+    [Parameter] public string? LoadProgressText { get; set; }
+
+    /// <summary>
+    /// Fração concluída da carga (0 a 1), ou <c>null</c> quando não há como medi-la e só
+    /// resta o texto. Hoje é sempre null: o percentual honesto é o de BYTES lidos, e o
+    /// LogStore ainda publica apenas "X/Y arquivos" — com um .clef de 150 MB no meio de
+    /// arquivos de 2 KB, essa contagem crava 95% com quase tudo por ler.
+    /// </summary>
+    [Parameter] public double? ProgressoCarga { get; set; }
+
     [Parameter] public EventCallback OnCancelLoad { get; set; }
+
+    /// <summary>Há uma filtragem/busca em andamento que já passou do limiar de demora.</summary>
+    [Parameter] public bool IsFiltering { get; set; }
+    [Parameter] public EventCallback OnCancelFilter { get; set; }
 
     [Parameter] public LogViewMode ViewMode { get; set; } = LogViewMode.List;
     [Parameter] public EventCallback<LogViewMode> OnSetViewMode { get; set; }

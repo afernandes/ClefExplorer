@@ -17,12 +17,9 @@
                 @onclick="ToggleRegex">.*</button>
     </div>
 
+    @* O seletor de "itens por página" saiu junto com a paginação: lista e tabela
+       virtualizam o conjunto filtrado inteiro, e a rolagem faz a navegação. *@
     <div class="clef-header-actions">
-        <OmniSelect TValue="int"
-                    Value="QuantidadeRegistros"
-                    ValueChanged="OnQtdChanged"
-                    Items="_qtdOptions"
-                    TextSelector="FormatQtd" />
         <OmniAppearanceToggle />
     </div>
 </OmniAppBar>
@@ -31,9 +28,6 @@
     [Parameter] public string TextoPesquisa { get; set; } = string.Empty;
     [Parameter] public EventCallback<string> TextoPesquisaChanged { get; set; }
 
-    [Parameter] public int QuantidadeRegistros { get; set; }
-    [Parameter] public EventCallback<int> QuantidadeRegistrosChanged { get; set; }
-
     [Parameter] public bool UsarRegex { get; set; }
     [Parameter] public EventCallback<bool> UsarRegexChanged { get; set; }
 
@@ -41,12 +35,6 @@
     [Parameter] public bool RegexInvalida { get; set; }
 
     [Parameter] public EventCallback OnReload { get; set; }
-
-    // Páginas grandes só passaram a fazer sentido depois que a lista virou virtualizada:
-    // antes, 1000 itens significavam 1000 nós no DOM.
-    private readonly int[] _qtdOptions = { 30, 50, 100, 250, 500, 1000 };
-
-    private static string FormatQtd(int v) => $"{v} itens";
 
     private async Task OnSearchChanged(string? v)
     {
@@ -60,9 +48,4 @@
         await UsarRegexChanged.InvokeAsync(UsarRegex);
     }
 
-    private async Task OnQtdChanged(int v)
-    {
-        QuantidadeRegistros = v;
-        await QuantidadeRegistrosChanged.InvokeAsync(v);
-    }
 }

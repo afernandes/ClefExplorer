@@ -30,12 +30,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="AndersonN.Omni.Blazor" Version="0.2.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.WindowsForms" Version="10.0.11" />
-    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3595.46" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
-    <PackageReference Include="Serilog" Version="4.3.0" />
-    <PackageReference Include="Serilog.Formatting.Compact.Reader" Version="4.0.0" />
+    <!-- Pacote gerado LOCALMENTE (ver /NuGet.config): a 0.4.0 publicada achata a árvore de
+         grupos inteira de uma vez e congela ao agrupar um log grande. Volta para uma versão
+         do nuget.org assim que a 0.5.0 sair. -->
+    <PackageReference Include="AndersonN.Omni.Blazor" Version="0.4.1-alpha.local.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.WindowsForms" Version="10.0.90" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.10" />
+    <!-- Só o Serilog: o LeitorClef substituiu o Serilog.Formatting.Compact.Reader (e o
+         Newtonsoft que vinha com ele). Do Serilog continuam em uso o MessageTemplate/
+         MessageTemplateParser, os LogEventPropertyValue e o JsonValueFormatter da exportação. -->
+    <PackageReference Include="Serilog" Version="4.4.0" />
   </ItemGroup>
 
 	<ItemGroup>

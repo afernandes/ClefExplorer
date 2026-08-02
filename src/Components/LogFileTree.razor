@@ -1,33 +1,57 @@
 @using System.IO
 @using System.Text.RegularExpressions
+@using ClefExplorer.Helpers
 
-@if (RootNodes.Any())
-{
-    <OmniTree Data="RootNodes"
-              AllowCheckboxes="true"
-              CheckedValues="_checkedNodes"
-              CheckedValuesChanged="OnCheckedChanged">
-        <OmniTreeLevel Text="@(o => ((FileTreeNode)o).Name)"
-                       Children="@(o => ((FileTreeNode)o).Children)"
-                       HasChildren="@(o => ((FileTreeNode)o).Children.Count > 0)"
-                       Expanded="@(o => true)"
-                       Icon="@(o => NodeIcon((FileTreeNode)o))">
-            <Template Context="item">
-                @{ var bk = item.Value is FileTreeNode fn && fn.IsBackup; }
-                @if (!string.IsNullOrEmpty(item.Icon))
-                {
-                    <OmniIcon Name="@item.Icon" Size="ComponentSize.Sm" Class="@(bk ? "omni-tree-icon clef-tree-backup" : "omni-tree-icon")" />
-                }
-                <span class="@(bk ? "omni-tree-text clef-tree-backup" : "omni-tree-text")">@item.Text</span>
-            </Template>
-        </OmniTreeLevel>
-    </OmniTree>
-}
-else
+@inject ContextMenuService ContextMenu
+@inject ExploradorArquivos Explorador
+@inject NotificationService Notifications
+@inject IJSRuntime JS
+
+@if (!RootNodes.Any())
 {
     <div class="clef-center" style="height:auto; padding:16px;">
         <span style="font-size:12px;">Nenhum arquivo carregado</span>
     </div>
+}
+else if (_raizesVisiveis.Count == 0)
+{
+    <div class="clef-center" style="height:auto; padding:16px;">
+        <span style="font-size:12px;">Nenhum arquivo corresponde à busca</span>
+    </div>
+}
+else
+{
+    @* Data/Children entregam os nós FILTRADOS, mas as MESMAS instâncias da árvore
+       completa — é o que permite a marcação (que o OmniTree guarda por referência)
+       sobreviver a uma busca. *@
+    <OmniTree Data="_raizesVisiveis"
+              AllowCheckboxes="true"
+              CheckedValues="_checkedNodes"
+              CheckedValuesChanged="OnCheckedChanged">
+        <OmniTreeLevel Text="@(o => ((FileTreeNode)o).Name)"
+                       Children="@(o => FilhosVisiveis((FileTreeNode)o))"
+                       HasChildren="@(o => FilhosVisiveis((FileTreeNode)o).Count > 0)"
+                       Expanded="@(o => true)"
+                       Icon="@(o => NodeIcon((FileTreeNode)o))">
+            <Template Context="item">
+                @{
+                    var node = item.Value as FileTreeNode;
+                    var bk = node?.IsBackup == true;
+                }
+                @* display:contents — o wrapper existe só para capturar o botão direito
+                   sobre o nó inteiro (ícone + texto) sem entrar no layout do OmniTree. *@
+                <span class="clef-tree-node"
+                      @oncontextmenu="@(e => AbrirMenu(e, node))"
+                      @oncontextmenu:preventDefault="true">
+                    @if (!string.IsNullOrEmpty(item.Icon))
+                    {
+                        <OmniIcon Name="@item.Icon" Size="ComponentSize.Sm" Class="@(bk ? "omni-tree-icon clef-tree-backup" : "omni-tree-icon")" />
+                    }
+                    <span class="@(bk ? "omni-tree-text clef-tree-backup" : "omni-tree-text")">@item.Text</span>
+                </span>
+            </Template>
+        </OmniTreeLevel>
+    </OmniTree>
 }
 
 @code {
@@ -35,9 +59,16 @@ else
     [Parameter] public IEnumerable<string> CheckedFiles { get; set; } = Enumerable.Empty<string>();
     [Parameter] public EventCallback<HashSet<string>> OnSelectionChanged { get; set; }
 
+    /// <summary>Termo digitado no campo de busca da barra lateral; vazio mostra tudo.</summary>
+    [Parameter] public string? Filtro { get; set; }
+
     private List<FileTreeNode> RootNodes { get; set; } = new();
     private List<object> _checkedNodes = new();
     private List<string>? _lastFiles;
+
+    private HashSet<FileTreeNode> _visiveis = new();
+    private List<FileTreeNode> _raizesVisiveis = new();
+    private string? _ultimoFiltro;
 
     protected override void OnParametersSet()
     {
@@ -57,7 +88,24 @@ else
             BuildTree();
             _checkedNodes = ComputeChecked(currentChecked);
         }
+
+        if (filesChanged || Filtro != _ultimoFiltro)
+        {
+            _ultimoFiltro = Filtro;
+            AplicarFiltro();
+        }
     }
+
+    // ─── Busca na árvore ────────────────────────────────────────────────────────
+
+    private void AplicarFiltro()
+    {
+        _visiveis = FiltroArvoreArquivos.Visiveis(RootNodes, Filtro);
+        _raizesVisiveis = RootNodes.Where(_visiveis.Contains).ToList();
+    }
+
+    private List<FileTreeNode> FilhosVisiveis(FileTreeNode node) =>
+        node.Children.Where(_visiveis.Contains).ToList();
 
     private static string NodeIcon(FileTreeNode node)
     {
@@ -109,6 +157,103 @@ else
             .Select(n => n.FullPath!);
         var set = new HashSet<string>(files, StringComparer.OrdinalIgnoreCase);
         await OnSelectionChanged.InvokeAsync(set);
+    }
+
+    // ─── Menu de contexto ───────────────────────────────────────────────────────
+
+    private void AbrirMenu(MouseEventArgs e, FileTreeNode? node)
+    {
+        if (node is null) return;
+        ContextMenu.Open(e, ConstruirMenu(node));
+    }
+
+    private List<ContextMenuItem> ConstruirMenu(FileTreeNode node)
+    {
+        var caminhos = node.CaminhosDescendentes().ToList();
+        var arquivo = node.FullPath;
+        var itens = new List<ContextMenuItem>();
+
+        // Um nó de agrupamento não tem pasta própria: a hierarquia vem do NOME do
+        // arquivo, então não há o que revelar no Explorer.
+        if (!string.IsNullOrEmpty(arquivo))
+        {
+            itens.Add(new ContextMenuItem
+            {
+                Text = "Mostrar no Explorer",
+                Icon = "folder",
+                OnClick = () => MostrarNoExplorer(arquivo),
+            });
+        }
+
+        if (caminhos.Count > 0)
+        {
+            itens.Add(new ContextMenuItem
+            {
+                Text = caminhos.Count == 1 ? "Copiar caminho" : $"Copiar {caminhos.Count} caminhos",
+                Icon = "copy",
+                OnClick = () => CopiarCaminhos(caminhos),
+            });
+
+            itens.Add(ContextMenuItem.Separator());
+
+            // Com dezenas de arquivos carregados, isolar um deles pelo checkbox significa
+            // desmarcar todos os outros a mão.
+            itens.Add(new ContextMenuItem
+            {
+                Text = caminhos.Count == 1 ? "Exibir somente este" : $"Exibir somente estes {caminhos.Count}",
+                Icon = "filter",
+                OnClick = () => ExibirSomente(caminhos),
+            });
+        }
+
+        itens.Add(new ContextMenuItem
+        {
+            Text = "Exibir todos os arquivos",
+            Icon = "list",
+            OnClick = ExibirTodos,
+        });
+
+        return itens;
+    }
+
+    private Task MostrarNoExplorer(string caminho)
+    {
+        if (!Explorador.Revelar(caminho))
+        {
+            Notifications.Warning("Arquivo não encontrado", caminho);
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task CopiarCaminhos(IReadOnlyList<string> caminhos)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", string.Join(Environment.NewLine, caminhos));
+            Notifications.Info(caminhos.Count == 1 ? "Caminho copiado" : $"{caminhos.Count} caminhos copiados");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warning("Não foi possível copiar para a área de transferência", ex);
+            Notifications.Warning("Não foi possível copiar o caminho");
+        }
+    }
+
+    private Task ExibirSomente(IEnumerable<string> caminhos) =>
+        AplicarSelecao(new HashSet<string>(caminhos, StringComparer.OrdinalIgnoreCase));
+
+    private Task ExibirTodos() =>
+        AplicarSelecao(new HashSet<string>(_lastFiles ?? new List<string>(), StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Troca a marcação inteira de uma vez. É a exceção à regra de que o OmniTree é a fonte
+    /// única durante a interação: aqui quem manda é uma ação explícita do usuário, e o
+    /// estado precisa ser reescrito nos dois lados (checkboxes e arquivos visíveis).
+    /// </summary>
+    private async Task AplicarSelecao(HashSet<string> caminhos)
+    {
+        _checkedNodes = ComputeChecked(caminhos);
+        await OnSelectionChanged.InvokeAsync(caminhos);
     }
 
     // ─── Construção da árvore virtual (lógica preservada da versão Bootstrap) ───
@@ -347,12 +492,4 @@ else
         }
     }
 
-    public class FileTreeNode
-    {
-        public string Name { get; set; } = "";
-        public string? FullPath { get; set; }
-        public List<FileTreeNode> Children { get; set; } = new();
-        public FileTreeNode? Parent { get; set; }
-        public bool IsBackup { get; set; }
-    }
 }

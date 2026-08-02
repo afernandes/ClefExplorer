@@ -12,123 +12,217 @@
    aplica a visibilidade no próprio OnInitialized, então toda vez que o grid é
    recriado — o que acontece ao abrir/fechar o painel de detalhes, já que o layout
    troca de splitter — as escolhas do menu interno se perdiam. Mantendo o conjunto
-   aqui, ele sobrevive à recriação e ainda é persistido entre execuções. *@
+   aqui, ele sobrevive à recriação e ainda é persistido entre execuções.
 
-<div class="clef-grid">
-    <OmniDataGrid TItem="ClefEvent"
-                  Data="@Eventos"
-                  Virtualize="true"
-                  Height="100%"
-                  AllowSorting="true"
-                  AllowGrouping="true"
-                  AllowColumnResize="true"
-                  AllowColumnVisibility="false"
-                  AllowColumnFilter="true"
-                  HideGroupedColumn="true"
-                  GroupPanelText="Arraste uma coluna aqui para agrupar"
-                  EmptyText="Nenhum registro encontrado"
-                  RowClass="@LinhaCss"
-                  OnRowClick="OnSelect">
-        <ToolbarContent>
-            <OmniPopover Open="_colunasOpen" OpenChanged="@(v => _colunasOpen = v)" ShowArrow="false" Offset="4" Width="240px">
-                <Trigger>
-                    <OmniButton Text="Colunas" Icon="sliders" Size="ComponentSize.Sm" Variant="ButtonVariant.Ghost" />
-                </Trigger>
-                <ChildContent>
-                    <div class="clef-col-chooser">
-                        @foreach (var col in TodasAsColunas)
-                        {
-                            var c = col;
-                            <label class="clef-col-item">
-                                <input type="checkbox"
-                                       checked="@VisibleColumns.Contains(c.Key)"
-                                       @onchange="@(e => Alternar(c.Key, (bool?)e.Value == true))" />
-                                <span>@c.Title</span>
-                            </label>
-                        }
-                    </div>
-                </ChildContent>
-            </OmniPopover>
-        </ToolbarContent>
+   As colunas entram e saem por @if, e NÃO pelo parâmetro Visible: na 0.2.0 a coluna
+   lê Visible só no OnInitialized, então alterá-lo depois não mexia em nada — marcar
+   e desmarcar no seletor não fazia a coluna aparecer nem sumir. Declarando de fato
+   só as colunas escolhidas, a que sai é descartada e se desregistra do grid.
+   (A biblioteca já foi corrigida para reagir a Visible; quando o app subir de versão
+   dá para voltar ao parâmetro, que evita recriar a coluna a cada troca.) *@
 
-        <Columns>
-            <OmniDataGridColumn TItem="ClefEvent"
-                                Title="Data/hora"
-                                PropertyName="Timestamp"
-                                Property="@(e => e.Timestamp ?? default)"
-                                TextSelector="@(e => e.Timestamp?.ToString("dd/MM/yyyy HH:mm:ss.fff") ?? "")"
-                                FilterType="ColumnFilterType.Date"
-                                Filterable="true"
-                                Visible="@VisibleColumns.Contains(LogGridColumns.Timestamp)"
-                                Width="165px" />
+<div class="clef-grid" aria-busy="@IsBusy.ToString().ToLowerInvariant()">
+    @* O grid não recebia nenhum sinal de trabalho em andamento: com a tabela ainda vazia,
+       a primeira filtragem de um log grande deixava a área central em "Nenhum registro
+       encontrado" — que é a resposta errada para "ainda estou filtrando". *@
+    @if (IsBusy)
+    {
+        <div class="clef-center">
+            <OmniSpinner Size="ComponentSize.Lg" />
+            <span>Carregando logs...</span>
+        </div>
+    }
+    else
+    {
+        @* Virtualize + sem paginação: o grid recebe o conjunto filtrado inteiro, então
+           ordenar, agrupar e filtrar valem sobre TODO o log. Só as linhas visíveis vão ao
+           DOM, e a rolagem substitui o paginador. *@
+        <OmniDataGrid TItem="ClefEvent"
+                      Data="@Eventos"
+                      Virtualize="true"
+                      AllowPaging="false"
+                      Height="100%"
+                      AllowSorting="true"
+                      AllowGrouping="true"
+                      AllowColumnResize="true"
+                      AllowColumnVisibility="false"
+                      AllowColumnFilter="true"
+                      HideGroupedColumn="true"
+                      GroupPanelText="Arraste uma coluna aqui para agrupar"
+                      EmptyText="Nenhum registro encontrado"
+                      RowClass="@LinhaCss"
+                      OnRowClick="OnSelect">
+            <ToolbarContent>
+                <OmniPopover Open="_colunasOpen" OpenChanged="@(v => _colunasOpen = v)" ShowArrow="false" Offset="4" Width="240px">
+                    <Trigger>
+                        <OmniButton Text="Colunas" Icon="sliders" Size="ComponentSize.Sm" Variant="ButtonVariant.Ghost" />
+                    </Trigger>
+                    <ChildContent>
+                        @* Em três seções: as fixas, as propriedades recorrentes do log e os
+                           campos de message template. Numa lista única, os campos de template
+                           (que podem ser dezenas) afogariam o resto. *@
+                        <div class="clef-col-chooser">
+                            @foreach (var col in LogGridColumns.Fixed)
+                            {
+                                @ItemDeColuna(col.Key, col.Title)
+                            }
 
-            <OmniDataGridColumn TItem="ClefEvent"
-                                Title="Nível"
-                                PropertyName="Level"
-                                Property="@(e => e.Level ?? "")"
-                                Groupable="true"
-                                Filterable="true"
-                                Visible="@VisibleColumns.Contains(LogGridColumns.Level)"
-                                Width="120px">
-                <Template Context="ev">
-                    <OmniBadge Variant="@LogLevelStyles.Variant(ev.Level)" Text="@ev.Level" Size="ComponentSize.Sm" />
-                </Template>
-            </OmniDataGridColumn>
+                            @if (ColunasDePropriedade.Count > 0)
+                            {
+                                <div class="clef-col-section">Propriedades</div>
+                                @foreach (var col in ColunasDePropriedade)
+                                {
+                                    @ItemDeColuna(col.Key, col.Title)
+                                }
+                            }
 
-            <OmniDataGridColumn TItem="ClefEvent"
-                                Title="Mensagem"
-                                PropertyName="Message"
-                                Property="@(e => e.Message ?? "")"
-                                Filterable="true"
-                                Visible="@VisibleColumns.Contains(LogGridColumns.Message)" />
+                            @if (ColunasDeTemplate.Count > 0)
+                            {
+                                <div class="clef-col-section">Campos da mensagem</div>
+                                @foreach (var col in ColunasDeTemplate)
+                                {
+                                    @ItemDeColuna(col.Key, col.Title)
+                                }
+                            }
+                        </div>
+                    </ChildContent>
+                </OmniPopover>
+            </ToolbarContent>
 
-            @* Só o nome do arquivo na célula; o caminho completo fica no title. *@
-            <OmniDataGridColumn TItem="ClefEvent"
-                                Title="Arquivo"
-                                PropertyName="SourceFile"
-                                Property="@(e => NomeArquivo(e))"
-                                Groupable="true"
-                                Filterable="true"
-                                Visible="@VisibleColumns.Contains(LogGridColumns.SourceFile)"
-                                Width="180px">
-                <Template Context="ev">
-                    <span title="@ev.SourceFile">@NomeArquivo(ev)</span>
-                </Template>
-            </OmniDataGridColumn>
+            <Columns>
+                @* Agrupa em Ano › Mês › Dia. Sem a hierarquia a chave seria o INSTANTE EXATO,
+                   que tem milissegundos e não se repete: cada evento viraria um grupo de um
+                   item — medido sobre os 314.973 eventos de C:\TOTVSPDV\Logs, o resultado é o
+                   teto do MaxGroups (10.000 grupos) e um aviso de corte no lugar da árvore.
+                   Ver a página /showcase/datagrid-date-grouping do Forneria.Demo.
 
-            <OmniDataGridColumn TItem="ClefEvent"
-                                Title="Exceção"
-                                PropertyName="Exception"
-                                Property="@(e => string.IsNullOrEmpty(e.Exception) ? "" : "sim")"
-                                Groupable="true"
-                                Visible="@VisibleColumns.Contains(LogGridColumns.Exception)"
-                                Width="90px">
-                <Template Context="ev">
-                    @if (!string.IsNullOrEmpty(ev.Exception))
-                    {
-                        <OmniIcon Name="zap" Size="ComponentSize.Sm" Class="clef-grid-exc" />
-                    }
-                </Template>
-            </OmniDataGridColumn>
+                   MaxGroups e AutoCollapseGroupsThreshold ficam nos defaults da biblioteca
+                   (10.000 e 100). Não é omissão: no mesmo conjunto, agrupar por data custa
+                   147 ms e achata 314.988 linhas, das quais ~110 chegam ao DOM — a lista
+                   achatada é entregue à virtualização, e é o teto do MaxGroups que segura o
+                   caso degenerado de uma coluna quase-única. Baixar o auto-colapso não teria
+                   efeito aqui: ele conta os grupos de PRIMEIRO nível, e esta hierarquia começa
+                   pelo ano, quase sempre um só. *@
+                @if (VisibleColumns.Contains(LogGridColumns.Timestamp))
+                {
+                    <OmniDataGridColumn TItem="ClefEvent"
+                                        Title="Data/hora"
+                                        PropertyName="Timestamp"
+                                        Property="@(e => e.Timestamp ?? default)"
+                                        TextSelector="@(e => e.Timestamp?.ToString("dd/MM/yyyy HH:mm:ss.fff") ?? "")"
+                                        FilterType="ColumnFilterType.Date"
+                                        Filterable="true"
+                                        Groupable="true"
+                                        GroupHierarchy="@DateGroupHierarchy.YearMonthDay"
+                                        Width="165px" />
+                }
 
-            @* Colunas derivadas do conteúdo dos logs carregados. *@
-            @foreach (var coluna in Colunas)
-            {
-                var c = coluna;
-                <OmniDataGridColumn TItem="ClefEvent"
-                                    Title="@c.Title"
-                                    PropertyName="@c.Key"
-                                    Property="@(e => LogColumnDiscovery.FormatValue(e, c.Key))"
-                                    Groupable="true"
-                                    Filterable="true"
-                                    Visible="@VisibleColumns.Contains(c.Key)"
-                                    Width="160px" />
-            }
-        </Columns>
-    </OmniDataGrid>
+                @if (VisibleColumns.Contains(LogGridColumns.Level))
+                {
+                    <OmniDataGridColumn TItem="ClefEvent"
+                                        Title="Nível"
+                                        PropertyName="Level"
+                                        Property="@(e => e.Level ?? "")"
+                                        Groupable="true"
+                                        Filterable="true"
+                                        Width="120px">
+                        <Template Context="ev">
+                            <OmniBadge Variant="@LogLevelStyles.Variant(ev.Level)" Text="@ev.Level" Size="ComponentSize.Sm" />
+                        </Template>
+                    </OmniDataGridColumn>
+                }
+
+                @* O VALOR da coluna é o template (@mt), não a mensagem formatada: agrupar pelo
+                   texto renderizado daria um grupo por linha, já que os parâmetros mudam a cada
+                   evento. Pelo template, "Intervalo otimizado para {ProviderKey}" junta todas as
+                   ocorrências — e os parâmetros viram colunas próprias (ver
+                   LogColumnDiscovery.ColumnSource.TemplateField) para agrupar e filtrar por eles.
+
+                   Os três seletores têm papéis distintos aqui:
+                     Property     → chave do agrupamento, ordenação e filtro (o template);
+                     TextSelector → rótulo do cabeçalho de grupo, que o grid tira do texto da
+                                    célula do PRIMEIRO item — com a mensagem formatada, o grupo
+                                    se chamaria por uma de suas linhas;
+                     Template     → o que a célula mostra de fato: a mensagem renderizada.
+
+                   Efeito colateral assumido: o filtro DESTA coluna procura no template;
+                   procurar por um valor ("RacClient") se faz na coluna do campo ou na busca
+                   global. Sem @mt (mensagem literal), tudo cai na própria mensagem. *@
+                @if (VisibleColumns.Contains(LogGridColumns.Message))
+                {
+                    <OmniDataGridColumn TItem="ClefEvent"
+                                        Title="Mensagem"
+                                        PropertyName="Message"
+                                        Property="@(e => TemplateOuMensagem(e))"
+                                        TextSelector="@(e => TemplateOuMensagem(e))"
+                                        Groupable="true"
+                                        Filterable="true">
+                        <Template Context="ev">
+                            <span title="@ev.Message">@ev.Message</span>
+                        </Template>
+                    </OmniDataGridColumn>
+                }
+
+                @* Só o nome do arquivo na célula; o caminho completo fica no title. *@
+                @if (VisibleColumns.Contains(LogGridColumns.SourceFile))
+                {
+                    <OmniDataGridColumn TItem="ClefEvent"
+                                        Title="Arquivo"
+                                        PropertyName="SourceFile"
+                                        Property="@(e => NomeArquivo(e))"
+                                        Groupable="true"
+                                        Filterable="true"
+                                        Width="180px">
+                        <Template Context="ev">
+                            <span title="@ev.SourceFile">@NomeArquivo(ev)</span>
+                        </Template>
+                    </OmniDataGridColumn>
+                }
+
+                @if (VisibleColumns.Contains(LogGridColumns.Exception))
+                {
+                    <OmniDataGridColumn TItem="ClefEvent"
+                                        Title="Exceção"
+                                        PropertyName="Exception"
+                                        Property="@(e => string.IsNullOrEmpty(e.Exception) ? "" : "sim")"
+                                        Groupable="true"
+                                        Width="90px">
+                        <Template Context="ev">
+                            @if (!string.IsNullOrEmpty(ev.Exception))
+                            {
+                                <OmniIcon Name="zap" Size="ComponentSize.Sm" Class="clef-grid-exc" />
+                            }
+                        </Template>
+                    </OmniDataGridColumn>
+                }
+
+                @* Colunas derivadas do conteúdo dos logs carregados.
+
+                   Property entrega o valor TIPADO (número como número) e TextSelector cuida do
+                   que aparece na célula. Com o texto nos dois papéis, a ordenação comparava
+                   string e "591" vinha antes de "78". *@
+                @foreach (var coluna in Colunas.Where(c => VisibleColumns.Contains(c.Key)))
+                {
+                    var c = coluna;
+                    <OmniDataGridColumn TItem="ClefEvent"
+                                        Title="@c.Title"
+                                        PropertyName="@c.Key"
+                                        Property="@(e => LogColumnDiscovery.GetSortValue(e, c.Key, c.Kind))"
+                                        TextSelector="@(e => LogColumnDiscovery.FormatValue(e, c.Key))"
+                                        FilterType="@LogColumnDiscovery.FilterTypeFor(c.Kind)"
+                                        Groupable="true"
+                                        Filterable="true"
+                                        Width="160px" />
+                }
+            </Columns>
+        </OmniDataGrid>
+    }
 </div>
 
 @code {
+    /// <summary>Filtragem em andamento sem nada ainda para mostrar.</summary>
+    [Parameter] public bool IsBusy { get; set; }
+
     [Parameter] public IReadOnlyList<ClefEvent> Eventos { get; set; } = Array.Empty<ClefEvent>();
     [Parameter] public ClefEvent? SelectedEvent { get; set; }
     [Parameter] public EventCallback<ClefEvent> OnSelect { get; set; }
@@ -143,9 +237,23 @@
 
     private bool _colunasOpen;
 
-    /// <summary>Fixas primeiro, depois as descobertas — a mesma ordem da tabela.</summary>
-    private IEnumerable<(string Key, string Title)> TodasAsColunas =>
-        LogGridColumns.Fixed.Concat(Colunas.Select(c => (c.Key, c.Title)));
+    /// <summary>Propriedades recorrentes do log (SourceContext, Application…).</summary>
+    private IReadOnlyList<DiscoveredColumn> ColunasDePropriedade =>
+        Colunas.Where(c => c.Source == ColumnSource.Property).ToList();
+
+    /// <summary>Parâmetros dos message templates ({ProviderKey}, {Interval}…).</summary>
+    private IReadOnlyList<DiscoveredColumn> ColunasDeTemplate =>
+        Colunas.Where(c => c.Source == ColumnSource.TemplateField).ToList();
+
+    private RenderFragment ItemDeColuna(string key, string title) => __builder =>
+    {
+        <label class="clef-col-item">
+            <input type="checkbox"
+                   checked="@VisibleColumns.Contains(key)"
+                   @onchange="@(e => Alternar(key, (bool?)e.Value == true))" />
+            <span>@title</span>
+        </label>
+    };
 
     private async Task Alternar(string key, bool visivel)
     {
@@ -158,6 +266,14 @@
 
     private static string NomeArquivo(ClefEvent e) =>
         string.IsNullOrEmpty(e.SourceFile) ? string.Empty : Path.GetFileName(e.SourceFile);
+
+    /// <summary>
+    /// Identidade da mensagem para agrupar, ordenar e filtrar: o template quando existe,
+    /// senão a própria mensagem (logs sem <c>@mt</c>, ou linhas em que o template É a
+    /// mensagem por não ter parâmetro).
+    /// </summary>
+    private static string TemplateOuMensagem(ClefEvent e) =>
+        !string.IsNullOrEmpty(e.MessageTemplate) ? e.MessageTemplate : e.Message ?? string.Empty;
 
     /// <summary>Destaca a linha selecionada e as de erro, como na lista.</summary>
     private string LinhaCss(ClefEvent e)

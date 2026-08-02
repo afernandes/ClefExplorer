@@ -34,15 +34,17 @@
         })();
     </script>
     <!-- Omni.Blazor design system (substitui o Bootstrap).
-         No BlazorWebView os static web assets da RCL são servidos a partir do
-         StaticWebAssetBasePath da lib ("/Omni.Blazor/..."), sem o prefixo "_content/". -->
-    <link rel="stylesheet" href="Omni.Blazor/css/omni.css" />
+         O caminho vem do BasePath que a lib declara nos seus static web assets: até a
+         0.2.0 era "Omni.Blazor/...", e da 0.4.0 em diante é o "_content/<lib>" padrão das
+         RCLs. Errar o prefixo dá 404 e o app abre sem estilo nenhum. -->
+    <link rel="stylesheet" href="_content/Omni.Blazor/css/omni.css" />
     <link rel="stylesheet" href="css/app.css" />
 </head>
 <body>
     <div id="app">Carregando...</div>
-    <script src="Omni.Blazor/js/Omni.js"></script>
+    <script src="_content/Omni.Blazor/js/Omni.js"></script>
     <script src="js/shortcuts.js"></script>
+    <script src="js/internal-drag.js"></script>
     <script src="_framework/blazor.webview.js"></script>
 </body>
 </html>

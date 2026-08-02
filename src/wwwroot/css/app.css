@@ -206,6 +206,16 @@ body {
     padding: 0 4px;
 }
 
+.clef-tree-search {
+    padding: 0 8px 6px;
+}
+
+/* Wrapper do nó só para capturar o botão direito: display:contents o remove da
+   caixa, deixando ícone e texto como filhos diretos do layout do OmniTree. */
+.clef-tree-node {
+    display: contents;
+}
+
 /* Popover "Abrir" deve ocupar a largura da sidebar */
 .clef-abrir-pop { display: block; width: 100%; }
 .clef-abrir-pop > .omni-popover-trigger { display: block; width: 100%; }
@@ -232,6 +242,22 @@ span.omni-tree-text.clef-tree-backup { font-weight: 600; }
     color: var(--omni-fg-muted);
 }
 
+/* Contagem + aviso de filtragem, à esquerda. min-width:0 para o texto encolher em vez
+   de empurrar as ações para fora da barra em janelas estreitas. */
+.clef-toolbar-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.clef-toolbar-filtering {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
 /* Ações da direita da toolbar (exportar + paginação) */
 .clef-toolbar-actions {
     display: flex;
@@ -239,11 +265,61 @@ span.omni-tree-text.clef-tree-backup { font-weight: 600; }
     gap: 8px;
 }
 
+/* Barra de progresso dentro da toolbar: largura fixa para o resto das ações não
+   dançar conforme o percentual avança. */
+.clef-toolbar-progress {
+    width: 120px;
+    flex: 0 0 auto;
+}
+
+/* ---- Carregando (miolo inteiro, enquanto não há o que mostrar) ------------- */
+.clef-loading {
+    flex-direction: column;
+    gap: 10px;
+    text-align: center;
+    padding: 24px;
+}
+
+.clef-loading-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--omni-fg);
+}
+
+/* O progresso muda a cada arquivo lido: tabular-nums evita o texto "dançar" a
+   cada atualização do contador. */
+.clef-loading-detail {
+    font-size: 13px;
+    color: var(--omni-fg-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.clef-loading-hint {
+    font-size: 12px;
+    color: var(--omni-fg-muted);
+    max-width: 380px;
+}
+
+.clef-loading-progress {
+    width: 280px;
+    max-width: 100%;
+}
+
 /* ---- Lista de logs -------------------------------------------------------- */
 .clef-list {
     height: 100%;
     overflow-y: auto;
     background: var(--omni-bg);
+}
+
+/* O OmniVirtualize se desenha como cartão (borda + cantos arredondados + fundo
+   elevado). Aqui ele OCUPA o painel inteiro, entre o splitter e a toolbar: a moldura
+   vira uma segunda borda colada na primeira, com cantos arredondados sobrando nos
+   vértices. A lista tem que encostar nas bordas do painel. */
+.clef-list .omni-virtualize {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
 }
 
 .clef-list-item {
@@ -623,20 +699,29 @@ span.omni-tree-text.clef-tree-backup { font-weight: 600; }
     background: var(--omni-bg);
 }
 
-/* Embed="true" faz o grid preencher o pai; garante o mesmo aqui. */
-.clef-grid > .omni-datagrid {
+/* A classe raiz do OmniDataGrid é "omni-grid" — estas regras miravam ".omni-datagrid",
+   que não existe na biblioteca, e por isso nunca chegaram a valer. */
+
+/* O grid preenche o pai. E, pelo mesmo motivo do .clef-list, sem moldura: ele se
+   desenha como cartão (borda + cantos arredondados + fundo elevado), mas aqui ocupa o
+   painel inteiro entre o splitter e a toolbar — a borda dele encosta na do painel e os
+   cantos arredondados sobram nos vértices. */
+.clef-grid > .omni-grid {
     flex: 1 1 auto;
     min-height: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
 }
 
 /* Linha do evento selecionado: mesma leitura da lista. */
-.clef-grid .omni-datagrid tbody tr.is-selected {
+.clef-grid .omni-grid tbody tr.is-selected {
     background: color-mix(in oklab, var(--omni-accent) 14%, var(--omni-bg));
 }
 
 /* Barra à esquerda em erros/fatais, como na lista — cor, e não só o badge,
    para o erro saltar mesmo com a coluna Nível oculta. */
-.clef-grid .omni-datagrid tbody tr.clef-grid-row-error td:first-child {
+.clef-grid .omni-grid tbody tr.clef-grid-row-error td:first-child {
     box-shadow: inset 3px 0 0 0 color-mix(in oklab, var(--omni-danger) 80%, var(--omni-fg));
 }
 
@@ -651,6 +736,17 @@ span.omni-tree-text.clef-tree-backup { font-weight: 600; }
     gap: 2px;
     max-height: 320px;
     overflow-y: auto;
+}
+
+/* Separa as fixas das descobertas e, entre estas, as propriedades dos campos de
+   template — que podem ser dezenas e afogariam o resto numa lista única. */
+.clef-col-section {
+    padding: 8px 8px 2px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--omni-fg-muted);
 }
 
 .clef-col-item {
