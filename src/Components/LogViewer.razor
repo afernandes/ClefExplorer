@@ -1,4 +1,5 @@
 @using System.Threading
+@using System.Text.RegularExpressions
 @using ClefExplorer.Models
 @using ClefExplorer.Services
 @using ClefExplorer.Helpers
@@ -12,11 +13,11 @@
 @inject DialogService Dialog
 @inject NotificationService Notifications
 @inject UiPreferencesService UiPreferences
+@inject ConsultaLogs Consulta
 @inject IJSRuntime JS
 
 <div class="clef-root">
     <LogHeader @bind-TextoPesquisa="TextoPesquisa"
-               @bind-QuantidadeRegistros="QuantidadeRegistros"
                @bind-UsarRegex="UsarRegex"
                RegexInvalida="@RegexInvalida"
                OnReload="Carregar" />
@@ -55,14 +56,21 @@
             <OmniSplitterPane>
                 <div class="clef-main">
                     <LogToolbar Subtitulo="@Subtitulo"
-                                @bind-CurrentPage="Pagina"
                                 TotalCount="@_todosEventos.Count"
-                                PageSize="@QuantidadeRegistros"
-                                OnExport="ExportarFiltrados"
+                                 OnExport="ExportarFiltrados"
+                                 IsExporting="@_isExporting"
+                                 ExportProgressText="@TextoProgressoExportacao"
+                                 ExportProcessados="@_eventosExportados"
+                                 ExportTotal="@_totalExportacao"
+                                 OnCancelExport="CancelarExportacao"
                                 TailEnabled="@Store.TailEnabled"
                                 OnToggleTail="AlternarAoVivo"
-                                IsLoading="@Store.IsLoading"
+                                 IsLoading="@Store.IsLoading"
+                                 LoadProgressText="@Store.LoadProgressText"
+                                 ProgressoCarga="@ProgressoCarga"
                                 OnCancelLoad="CancelarCarregamento"
+                                IsFiltering="@_consultaDemorada"
+                                OnCancelFilter="CancelarFiltragem"
                                 DetailVisible="@(_selected != null)"
                                 DetailAtBottom="@DetalheAbaixo"
                                 OnToggleDetailPosition="AlternarPosicaoDetalhe"
@@ -113,15 +121,61 @@
 @code {
     private RenderFragment RenderEventos() => __builder =>
     {
-        if (ModoEstatisticas)
+        @* Carregando e ainda sem nada para mostrar: o miolo inteiro vira o indicador de
+           progresso. Um texto pequeno na barra superior, com a área central vazia, lia-se
+           como "não tem log" ou "travou" — que é o oposto de "estou lendo 40 arquivos". *@
+        if (EstaCarregandoVazio)
         {
-            <LogStatsPanel Stats="@_stats"
-                           OnFilterLevel="FiltrarPorNivel"
-                           OnFilterText="FiltrarPorTexto" />
+            <div class="clef-center clef-loading">
+                <OmniSpinner Size="ComponentSize.Lg" />
+                <div class="clef-loading-title">Carregando logs…</div>
+                @if (ProgressoCarga is { } fracao)
+                {
+                    <OmniProgress Value="@(fracao * 100)" Class="clef-loading-progress" />
+                }
+                <div class="clef-loading-detail" role="status" aria-live="polite">
+                    @(string.IsNullOrWhiteSpace(Store.LoadProgressText) ? "Preparando a leitura…" : Store.LoadProgressText)
+                </div>
+                @* Contagem parcial: enquanto o Store publicar os eventos só no fim da
+                   leitura ela fica em zero e some — quando ele passar a publicar em lotes,
+                   o número aparece sozinho e a tela deixa de ser só um spinner. *@
+                @if (Store.Count > 0)
+                {
+                    <div class="clef-loading-detail">@Store.Count.ToString("N0") eventos lidos até agora</div>
+                }
+                <div class="clef-loading-hint">Arquivos grandes levam alguns segundos. Você pode interromper a qualquer momento.</div>
+                <OmniButton Text="Cancelar carregamento" Icon="x" Size="ComponentSize.Sm"
+                            Variant="ButtonVariant.Ghost" OnClick="CancelarCarregamento" />
+            </div>
         }
+        else if (ModoEstatisticas)
+        {
+            @* O painel de estatísticas não recebe IsBusy (é de outra frente): trocar o
+               painel inteiro pelo spinner dá o mesmo resultado e evita exibir os números
+               de um filtro que já não vale. *@
+            if (_isBusy)
+            {
+                <div class="clef-center">
+                    <OmniSpinner Size="ComponentSize.Lg" />
+                    <span>Calculando estatísticas...</span>
+                </div>
+            }
+            else
+            {
+                <LogStatsPanel Stats="@_stats"
+                               OnFilterLevel="FiltrarPorNivel"
+                               OnFilterText="FiltrarPorTexto" />
+            }
+        }
+        @* Lista e tabela recebem o conjunto FILTRADO INTEIRO, e não uma página.
+           Entregar 50 itens fazia o grid ordenar, agrupar e filtrar só dentro deles: o
+           usuário clicava em "Data/hora" e reordenava a página, não o log. Os dois
+           componentes virtualizam (só o que está na tela vai ao DOM), então a rolagem
+           substitui a paginação sem custo de renderização. *@
         else if (ModoTabela)
         {
-            <LogGrid Eventos="@_eventos"
+            <LogGrid IsBusy="@_isBusy"
+                     Eventos="@_todosEventos"
                      SelectedEvent="@_selected"
                      OnSelect="Select"
                      Colunas="@_colunasDescobertas"
@@ -131,52 +185,85 @@
         else
         {
             <LogList IsBusy="@_isBusy"
-                     Eventos="@_eventos"
+                     Eventos="@_todosEventos"
                      SelectedEvent="@_selected"
                      OnSelect="Select" />
         }
     };
 
+    /// <summary>
+    /// Carga em andamento sem nada ainda na tela. Enquanto já houver eventos exibidos, o
+    /// progresso fica só na barra: trocar a lista por um spinner tiraria do usuário o que
+    /// ele já conseguia ler.
+    /// </summary>
+    private bool EstaCarregandoVazio => Store.IsLoading && _todosEventos.Count == 0;
+
     private ClefEvent? _selected;
     private bool _isBusy;
+    private bool _descartado;
+
+    /// <summary>
+    /// Consultas de filtragem ainda em voo. O <c>_isBusy</c> ficava PRESO em true sempre
+    /// que <c>ExecutarAsync</c> devolvia null (consulta substituída por outra mais
+    /// recente): esse caminho saía por <c>return</c> sem desligar o indicador, e bastava
+    /// uma filtragem durar mais que o intervalo do modo ao vivo para o spinner ficar na
+    /// tela para sempre. Contando as consultas — todas passam pelo <c>finally</c>,
+    /// inclusive as descartadas — o indicador fica amarrado ao ciclo de vida delas.
+    /// Só é tocado no dispatcher: todo ponto de entrada da filtragem já está nele, e os
+    /// <c>await</c> de um componente Blazor retomam nele.
+    /// </summary>
+    private int _consultasEmVoo;
+
+    /// <summary>
+    /// Uma filtragem passou do limiar sem terminar. Abaixo dele o aviso entraria e sairia
+    /// da tela a cada tecla da busca, sem dar tempo de ser lido.
+    /// </summary>
+    private bool _consultaDemorada;
+
+    private static readonly TimeSpan LimiarDeDemora = TimeSpan.FromMilliseconds(300);
+
     private List<ClefEvent> _todosEventos = new();
-    private List<ClefEvent> _eventos = new();
-    private int _quantidadeRegistros = 50;
-    private int _pagina = 1;
     private string _textoPesquisa = string.Empty;
     private HashSet<string> _niveisSelecionados = new(StringComparer.OrdinalIgnoreCase);
     private bool _usarRegex;
     private HashSet<string>? _visibleFiles;
     private DateTime? _dataInicial;
     private DateTime? _dataFinal;
-    private CancellationTokenSource? _filterCts;
     private bool _showDefaultAppNotification;
+    private bool _isExporting;
+    private int _eventosExportados;
+    private int _totalExportacao;
+    private CancellationTokenSource? _exportCts;
 
-    private int QuantidadeRegistros
+    private string TextoProgressoExportacao =>
+        $"Exportando {_eventosExportados:N0}/{_totalExportacao:N0}";
+
+    /// <summary>
+    /// Fração concluída da carga, ou <c>null</c> enquanto não houver como medi-la.
+    /// O único percentual honesto é o de BYTES lidos (a soma dos tamanhos dos arquivos
+    /// como denominador); "X/Y arquivos", que é o que o LogStore publica hoje, marca 95%
+    /// com o .clef de 150 MB ainda por ler. Ligar isto depende de o Store expor os bytes
+    /// lidos e o total a ler — enquanto não expõe, a barra não aparece e fica só o texto.
+    /// </summary>
+    private double? ProgressoCarga => null;
+
+    /// <summary>
+    /// Quantos eventos o filtro selecionou, e quantos existem carregados. A rolagem
+    /// virtualizada substituiu a paginação — o que interessa agora é o tamanho do
+    /// conjunto, não em que fatia dele o usuário está.
+    /// </summary>
+    private string Subtitulo
     {
-        get => _quantidadeRegistros;
-        set
+        get
         {
-            _quantidadeRegistros = value;
-            Pagina = 1;
-            AtualizarPagina();
+            var total = Store.Count;
+            var filtrados = _todosEventos.Count;
+            if (total == 0) return "Nenhum log carregado";
+            return filtrados == total
+                ? $"{total:N0} eventos"
+                : $"{filtrados:N0} de {total:N0} eventos";
         }
     }
-
-    private int Pagina
-    {
-        get => _pagina;
-        set
-        {
-            _pagina = Math.Clamp(value, 1, UltimaPagina);
-            AtualizarPagina();
-        }
-    }
-
-    private int UltimaPagina => Math.Max(1, (int)Math.Ceiling((_todosEventos.Count) / (double)QuantidadeRegistros));
-    private string Subtitulo => _todosEventos.Count > 0
-        ? $"{Math.Min((Pagina - 1) * QuantidadeRegistros + 1, _todosEventos.Count)}-{Math.Min(Pagina * QuantidadeRegistros, _todosEventos.Count)} de {_todosEventos.Count}"
-        : "0 de 0";
 
     private string TextoPesquisa
     {
@@ -351,7 +438,7 @@
         Notifications.Warning(resumo, detalhe);
     }
 
-    private void OnStoreChanged() => _ = InvokeAsync(() =>
+    private void OnStoreChanged() => DespacharNaUi(() =>
     {
         // NÃO resetar _visibleFiles aqui: este evento também dispara durante
         // UpdateLoadedFiles (ao (des)marcar arquivos na árvore), e zerar a
@@ -360,7 +447,9 @@
         // que o usuário acabou de marcar. O reset é feito só ao abrir algo novo.
         if (Store.IsLoading)
         {
-            _isBusy = true;
+            // Mesma regra da filtragem: com eventos já na tela, o progresso fica só na
+            // barra superior em vez de substituir o que o usuário estava lendo.
+            if (_todosEventos.Count == 0) _isBusy = true;
             StateHasChanged();
         }
         else
@@ -370,13 +459,41 @@
         }
     });
 
-    private void OnGroupsChanged() => _ = InvokeAsync(StateHasChanged);
+    private void OnGroupsChanged() => DespacharNaUi(StateHasChanged);
 
     /// <summary>
     /// Um conjunto novo de caminhos foi carregado (menu Abrir, arrastar e soltar, linha de
     /// comando ou outra instância): a seleção de arquivos visíveis não vale mais.
     /// </summary>
-    private void OnPathsLoaded() => _visibleFiles = null;
+    /// <remarks>
+    /// O LogStore dispara este evento de uma thread do pool (os await de
+    /// LoadFromPathsAsync usam ConfigureAwait(false)), então escrever <c>_visibleFiles</c>
+    /// direto corria com a leitura do campo na thread da UI — inclusive durante o render.
+    /// </remarks>
+    private void OnPathsLoaded() => DespacharNaUi(() => _visibleFiles = null);
+
+    /// <summary>
+    /// Executa no dispatcher e NÃO engole a exceção. Com <c>_ = InvokeAsync(...)</c> a
+    /// Task descartada guardava qualquer falha do callback (ReportarFalhasDeLeitura, por
+    /// exemplo) e ninguém a observava: o evento simplesmente não acontecia, sem rastro.
+    /// </summary>
+    private void DespacharNaUi(Action acao) => _ = DespacharNaUiAsync(acao);
+
+    private async Task DespacharNaUiAsync(Action acao)
+    {
+        try
+        {
+            await InvokeAsync(acao);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Componente descartado enquanto o evento do Store estava a caminho.
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("Falha ao processar um evento do LogStore", ex);
+        }
+    }
 
     // --- Atalhos de teclado ------------------------------------------------------
 
@@ -396,7 +513,25 @@
             // Sem atalhos o app segue utilizável pelo mouse.
             AppLog.Warning("Não foi possível registrar os atalhos de teclado", ex);
         }
+
+        try
+        {
+            await JS.InvokeVoidAsync("clefInternalDrag.register", _shortcutRef);
+        }
+        catch (Exception ex)
+        {
+            // Sem isto, arrastar dentro da página (agrupar por coluna) segue bloqueado,
+            // mas o resto do app não é afetado.
+            AppLog.Warning("Não foi possível registrar o arraste interno", ex);
+        }
     }
+
+    /// <summary>
+    /// Avisa o host que um arraste DENTRO da página começou (ou terminou), para ele
+    /// liberar o WebView2 como alvo de soltura enquanto durar. Ver wwwroot/js/internal-drag.js.
+    /// </summary>
+    [JSInvokable]
+    public void SetInternalDragMode(bool interno) => WebViewDropMode.SetInternalDrag(interno);
 
     /// <summary>Recebe as ações traduzidas pelo listener de teclado (wwwroot/js/shortcuts.js).</summary>
     [JSInvokable]
@@ -417,30 +552,67 @@
         StateHasChanged();
     }
 
-    /// <summary>Move a seleção dentro da página atual (setas ↑/↓).</summary>
+    /// <summary>
+    /// Posição de <see cref="_selected"/> em <see cref="_todosEventos"/>, ou -1 quando não
+    /// se sabe. Cada seta fazia um IndexOf linear no conjunto inteiro — 5,1 ms com 1 milhão
+    /// de eventos, e com o auto-repeat do teclado (~30 teclas/s) isso ocupava a thread da
+    /// UI o tempo todo. Guardando a posição, só a PRIMEIRA seta depois de um clique ou de
+    /// uma filtragem paga a varredura.
+    /// </summary>
+    private int _indiceSelecionado = -1;
+
+    private int IndiceDaSelecao()
+    {
+        if (_selected is null) return -1;
+
+        // O índice guardado só vale enquanto ainda apontar para o evento selecionado: a
+        // lista é substituída a cada filtragem e a seleção sobrevive a ela.
+        if (_indiceSelecionado >= 0
+            && _indiceSelecionado < _todosEventos.Count
+            && ReferenceEquals(_todosEventos[_indiceSelecionado], _selected))
+        {
+            return _indiceSelecionado;
+        }
+
+        return _indiceSelecionado = _todosEventos.IndexOf(_selected);
+    }
+
+    /// <summary>Move a seleção pelo conjunto filtrado (setas ↑/↓).</summary>
     private void MoverSelecao(int delta)
     {
-        if (_eventos.Count == 0) return;
+        if (_todosEventos.Count == 0) return;
 
-        var atual = _selected is null ? -1 : _eventos.IndexOf(_selected);
+        var atual = IndiceDaSelecao();
         // Sem seleção: ↓ começa no primeiro, ↑ no último.
         var proximo = atual < 0
-            ? (delta > 0 ? 0 : _eventos.Count - 1)
-            : Math.Clamp(atual + delta, 0, _eventos.Count - 1);
+            ? (delta > 0 ? 0 : _todosEventos.Count - 1)
+            : Math.Clamp(atual + delta, 0, _todosEventos.Count - 1);
 
-        _selected = _eventos[proximo];
+        _selected = _todosEventos[proximo];
+        _indiceSelecionado = proximo;
     }
 
     public void Dispose()
     {
+        // Continuações em voo (filtragem, estatísticas, aviso de demora) ainda podem
+        // retomar depois daqui; a partir deste ponto elas não tocam mais no componente.
+        _descartado = true;
+
         _ = JS.InvokeVoidAsync("clefShortcuts.unregister");
+        _ = JS.InvokeVoidAsync("clefInternalDrag.unregister");
+        WebViewDropMode.SetInternalDrag(false);
         _shortcutRef?.Dispose();
 
         Store.Changed -= OnStoreChanged;
         Store.PathsLoaded -= OnPathsLoaded;
         GroupService.Changed -= OnGroupsChanged;
 
-        foreach (var campo in new[] { Interlocked.Exchange(ref _filterCts, null), Interlocked.Exchange(ref _debounceCts, null) })
+        Consulta.CancelarConsultaAtual();
+        foreach (var campo in new[]
+        {
+            Interlocked.Exchange(ref _debounceCts, null),
+            Interlocked.Exchange(ref _exportCts, null),
+        })
         {
             if (campo is null) continue;
             try { campo.Cancel(); } catch (ObjectDisposedException) { }
@@ -490,28 +662,24 @@
 
     private async Task AplicarFiltrosAsync()
     {
-        // Cada invocação é dona do próprio CTS e o descarta no finally: cancelamos o
-        // anterior (sem descartá-lo, pois a invocação dele ainda pode estar lendo o token)
-        // e deixamos que aquela invocação faça o próprio descarte ao terminar.
-        var cts = new CancellationTokenSource();
-        var previous = Interlocked.Exchange(ref _filterCts, cts);
-        if (previous is not null)
-        {
-            try { previous.Cancel(); } catch (ObjectDisposedException) { }
-        }
-        var token = cts.Token;
-
-        _isBusy = true;
-        StateHasChanged();
+        long? geracaoProcessada = null;
+        _consultasEmVoo++;
 
         try
         {
+            // Só troca o conteúdo por um spinner quando não há NADA para trocar. Com a
+            // lista preenchida, cada refiltragem — uma tecla na busca, um tick do modo ao
+            // vivo — apagava por alguns quadros justamente o que o usuário estava lendo.
+            if (_todosEventos.Count == 0) _isBusy = true;
+            StateHasChanged();
+            _ = AvisarSeDemorar();
+
             var criterios = new LogFilterCriteria
             {
                 VisibleFiles = _visibleFiles,
                 Levels = _niveisSelecionados.Count > 0 ? _niveisSelecionados : null,
                 From = _dataInicial,
-                To = _dataFinal,
+                To = PeriodoFiltro.FimDoMinuto(_dataFinal),
                 Search = _textoPesquisa,
                 UseRegex = _usarRegex,
                 // O Store mantém os eventos ordenados e os filtros preservam a ordem
@@ -519,56 +687,118 @@
                 InputAlreadySorted = true,
             };
 
-            await Task.Run(() =>
+            // O Snapshot é o array publicado, sem cópia: a consulta pode enumerá-lo numa
+            // thread do pool porque o Store SUBSTITUI a referência (carga nova, merge do
+            // tail) em vez de mexer no array que já entregou. Ler aqui, e não dentro da
+            // consulta, também fixa o conjunto desta geração.
+            var resultado = await Consulta.ExecutarAsync(Store.Snapshot(), criterios);
+            if (resultado is null) return;
+            geracaoProcessada = resultado.Geracao;
+
+            // Estatísticas FORA do dispatcher: rodando dentro do InvokeAsync abaixo, o
+            // Compute custava 414 ms medidos com 1 milhão de eventos — a cada filtragem, e
+            // uma vez por segundo com o modo ao vivo ligado. Era o maior travamento da
+            // janela, e não a filtragem, que já roda em background.
+            var geracaoStats = 0L;
+            LogStats? estatisticas = null;
+            if (ModoEstatisticas && Consulta.EstaAtual(resultado.Geracao))
             {
-                if (token.IsCancellationRequested) return;
+                geracaoStats = Interlocked.Increment(ref _geracaoEstatisticas);
+                estatisticas = await CalcularEstatisticasAsync(resultado.Eventos);
+            }
 
-                // Snapshot sob lock: a filtragem enumera fora do lock do Store,
-                // enquanto UpdateLoadedFiles pode mutar a lista em paralelo.
-                var result = LogFilter.Apply(Store.Snapshot(), criterios);
+            await InvokeAsync(() =>
+            {
+                // A checagem precisa ocorrer dentro do callback: outra consulta pode começar
+                // entre o término do trabalho em background e a vez deste callback na UI.
+                if (!Consulta.EstaAtual(resultado.Geracao)) return;
 
-                if (token.IsCancellationRequested) return;
-
-                InvokeAsync(() =>
+                // Sem ToList: LogFilter.Apply já devolve uma List nova e não compartilhada,
+                // então a cópia só duplicava 8 MB de referências por filtragem a 1M eventos.
+                _todosEventos = resultado.Eventos as List<ClefEvent> ?? resultado.Eventos.ToList();
+                _indiceSelecionado = -1;
+                if (ModoTabela) DescobrirColunas();
+                if (estatisticas is not null && Volatile.Read(ref _geracaoEstatisticas) == geracaoStats)
                 {
-                    _todosEventos = result;
-                    if (_pagina > UltimaPagina) _pagina = 1;
-                    AtualizarPagina();
-                    // Colunas e estatísticas derivam do conjunto, então mudam junto com ele.
-                    // Só recalcula no modo que as usa — nos demais seria trabalho jogado fora.
-                    if (ModoTabela) DescobrirColunas();
-                    if (ModoEstatisticas) CalcularEstatisticas();
-                    _isBusy = false;
-                    StateHasChanged();
-                });
-
-            }, token);
+                    _stats = estatisticas;
+                }
+            });
         }
         catch (OperationCanceledException)
         {
             // Filtragem substituída por outra mais recente — descarte esperado.
         }
+        catch (FalhaConsultaLogsException ex)
+        {
+            if (!Consulta.EstaAtual(ex.Geracao)) return;
+            if (ex.InnerException is RegexMatchTimeoutException)
+            {
+                Notifications.Warning(
+                    "Expressão regular muito complexa",
+                    "A busca foi interrompida para manter o aplicativo responsivo.");
+            }
+            else
+            {
+                AppLog.Error("Falha ao aplicar os filtros", ex.InnerException ?? ex);
+                Notifications.Error("Não foi possível aplicar os filtros", ex.Message);
+            }
+        }
         catch (Exception ex)
         {
-            AppLog.Error("Falha ao aplicar os filtros", ex);
-            Notifications.Error("Não foi possível aplicar os filtros", ex.Message);
-            _isBusy = false;
-            StateHasChanged();
+            if (geracaoProcessada is { } geracao && !Consulta.EstaAtual(geracao)) return;
+            AppLog.Error("Falha ao atualizar a visualização filtrada", ex);
         }
         finally
         {
-            // Só limpa o campo se ainda apontar para este CTS (uma invocação mais
-            // recente pode tê-lo substituído) e então descarta o próprio.
-            Interlocked.CompareExchange(ref _filterCts, null, cts);
-            cts.Dispose();
+            // Todo caminho de saída passa por aqui — inclusive o `return` da consulta
+            // substituída, que antes deixava o indicador ligado para sempre.
+            FinalizarConsulta();
         }
     }
 
-    private void AtualizarPagina()
+    /// <summary>
+    /// Desliga os indicadores quando a ÚLTIMA consulta em voo termina. Com duas filtragens
+    /// se sobrepondo (o debounce da busca dispara a segunda antes de a primeira responder),
+    /// desligar no fim da primeira apagaria o aviso enquanto o trabalho continua.
+    /// </summary>
+    private void FinalizarConsulta()
     {
-        var skip = (Pagina - 1) * QuantidadeRegistros;
-        _eventos = _todosEventos.Skip(skip).Take(QuantidadeRegistros).ToList();
+        if (--_consultasEmVoo > 0 || _descartado) return;
+
+        _isBusy = false;
+        _consultaDemorada = false;
+        StateHasChanged();
     }
+
+    /// <summary>
+    /// Passado o limiar com a filtragem ainda em andamento, mostra o aviso e o botão de
+    /// cancelar. Ordenar ou buscar em 1 milhão de eventos passa de um segundo, e até aqui
+    /// não havia nem sinal de trabalho nem como desistir.
+    /// </summary>
+    private async Task AvisarSeDemorar()
+    {
+        await Task.Delay(LimiarDeDemora);
+
+        if (_descartado || _consultasEmVoo == 0 || _consultaDemorada) return;
+        _consultaDemorada = true;
+        StateHasChanged();
+    }
+
+    /// <summary>Interrompe a filtragem/busca em andamento, mantendo o resultado anterior.</summary>
+    private void CancelarFiltragem()
+    {
+        // A próxima filtragem pode ainda estar no debounce da busca: cancelar só a consulta
+        // em voo deixaria o texto pendente disparar outra logo em seguida.
+        var pendente = Volatile.Read(ref _debounceCts);
+        if (pendente is not null)
+        {
+            try { pendente.Cancel(); } catch (ObjectDisposedException) { }
+        }
+
+        Consulta.CancelarConsultaAtual();
+        Notifications.Info("Filtragem cancelada", "O resultado anterior continua na tela.");
+    }
+
 
     private async Task AbrirArquivoDialog()
     {
@@ -639,31 +869,49 @@
 
     private IReadOnlyList<DiscoveredColumn> _colunasDescobertas = Array.Empty<DiscoveredColumn>();
 
+    /// <summary>
+    /// Identifica cada cálculo de estatísticas em voo. Trocar de modo e refiltrar disparam
+    /// cálculos por caminhos diferentes: sem a geração, o mais LENTO publicaria por último
+    /// e o painel mostraria os números de um conjunto que já não está na tela.
+    /// </summary>
+    private long _geracaoEstatisticas;
+
     /// <summary>Troca o modo de visualização, persistindo a escolha.</summary>
-    private void DefinirModoVisualizacao(LogViewMode modo)
+    private async Task DefinirModoVisualizacao(LogViewMode modo)
     {
         UiPreferences.SetViewMode(modo);
 
         // Colunas e estatísticas vêm do conjunto atual; só são calculadas no modo que
         // as usa, para não gastar trabalho à toa nos demais.
         if (ModoTabela) DescobrirColunas();
-        if (ModoEstatisticas) CalcularEstatisticas();
+        if (!ModoEstatisticas) return;
+
+        var geracao = Interlocked.Increment(ref _geracaoEstatisticas);
+        var estatisticas = await CalcularEstatisticasAsync(_todosEventos);
+
+        if (_descartado || Volatile.Read(ref _geracaoEstatisticas) != geracao) return;
+        _stats = estatisticas;
+        StateHasChanged();
     }
 
     /// <summary>
     /// Agrega o conjunto FILTRADO inteiro — não a página. As estatísticas precisam refletir
     /// tudo o que o filtro selecionou, senão responderiam sobre uma amostra arbitrária.
     /// </summary>
-    private void CalcularEstatisticas()
+    /// <remarks>
+    /// Devolve o resultado em vez de atribuir <c>_stats</c>: o cálculo sai do dispatcher
+    /// (Task.Run) e quem chamou publica dentro do InvokeAsync, junto com o resto do estado.
+    /// </remarks>
+    private static async Task<LogStats> CalcularEstatisticasAsync(IReadOnlyList<ClefEvent> eventos)
     {
         try
         {
-            _stats = LogStatistics.Compute(_todosEventos);
+            return await Task.Run(() => LogStatistics.Compute(eventos));
         }
         catch (Exception ex)
         {
             AppLog.Error("Falha ao calcular as estatísticas", ex);
-            _stats = new LogStats();
+            return new LogStats();
         }
     }
 
@@ -721,7 +969,7 @@
     /// </summary>
     private async Task ExportarFiltrados()
     {
-        if (_todosEventos.Count == 0) return;
+        if (_todosEventos.Count == 0 || _isExporting) return;
 
         // Snapshot antes do diálogo: a filtragem e o modo ao vivo substituem _todosEventos
         // de forma assíncrona, então exportar direto do campo poderia gravar um conjunto
@@ -732,21 +980,64 @@
         var destino = await FilePicker.PickSaveFileAsync(LogExporter.DialogFilter, sugestao);
         if (destino is null) return;
 
+        var cts = new CancellationTokenSource();
+        _exportCts = cts;
+        _isExporting = true;
+        _eventosExportados = 0;
+        _totalExportacao = paraExportar.Length;
+        StateHasChanged();
+
         try
         {
             var formato = LogExporter.FormatFromPath(destino);
-            var conteudo = await Task.Run(() => LogExporter.Export(paraExportar, formato));
-            await File.WriteAllTextAsync(destino, conteudo);
+            // O LogExporter já limita o ritmo (1% do total ou 250 ms): são ~100 avisos por
+            // exportação, e não um por evento como antes — o que enfileirava 200 mil
+            // StateHasChanged e sozinho saturava o message pump por quase 4 segundos.
+            var progresso = new Progress<int>(processados => DespacharNaUi(() =>
+            {
+                _eventosExportados = processados;
+                StateHasChanged();
+            }));
+
+            // Task.Run: o StreamWriter completa a escrita de forma síncrona enquanto o
+            // buffer de 64 KB não enche, então sem isto a formatação de CSV/CLEF de todos
+            // os eventos rodava na thread da UI até o primeiro flush real.
+            await Task.Run(
+                () => LogExporter.ExportToFileAsync(
+                    paraExportar,
+                    destino,
+                    formato,
+                    cts.Token,
+                    progresso),
+                cts.Token);
 
             Notifications.Success(
                 $"{paraExportar.Length} eventos exportados",
                 Path.GetFileName(destino));
+        }
+        catch (OperationCanceledException)
+        {
+            Notifications.Info("Exportação cancelada", "O arquivo de destino anterior foi preservado.");
         }
         catch (Exception ex)
         {
             AppLog.Error($"Falha ao exportar para '{destino}'", ex);
             Notifications.Error("Não foi possível exportar", ex.Message);
         }
+        finally
+        {
+            Interlocked.CompareExchange(ref _exportCts, null, cts);
+            cts.Dispose();
+            _isExporting = false;
+            StateHasChanged();
+        }
+    }
+
+    private void CancelarExportacao()
+    {
+        var cts = Volatile.Read(ref _exportCts);
+        if (cts is null) return;
+        try { cts.Cancel(); } catch (ObjectDisposedException) { }
     }
 
     private async Task AbrirConfiguracoes()
@@ -763,6 +1054,9 @@
     private void Select(ClefEvent e)
     {
         _selected = e;
+        // A lista/grade entrega o evento, não a posição: invalidar aqui faz a próxima
+        // seta pagar uma varredura e as seguintes andarem pelo índice guardado.
+        _indiceSelecionado = -1;
     }
 
     private void CloseDetail()

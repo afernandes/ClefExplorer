@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Web.WebView2.Core;
 using ClefExplorer.Models;
 using ClefExplorer.Services;
+using System.Diagnostics;
 
 namespace ClefExplorer
 {
@@ -114,6 +115,25 @@ namespace ClefExplorer
                 .ToArray();
         }
 
+        /// <summary>
+        /// Libera (ou retoma) o WebView2 como alvo de soltura enquanto dura um arraste
+        /// iniciado dentro da página. Fora desse intervalo o flag volta a <c>false</c>,
+        /// que é o que faz o drop de arquivos chegar aqui com os caminhos reais.
+        /// </summary>
+        private void PermitirArrasteInterno(bool interno)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<bool>(PermitirArrasteInterno), interno);
+                return;
+            }
+
+            var webView = _blazorWebView?.WebView;
+            if (webView?.CoreWebView2 is null) return;
+
+            webView.AllowExternalDrop = interno;
+        }
+
         private void MainForm_DragEnter(object? sender, DragEventArgs e)
         {
             e.Effect = ExtractDroppedPaths(e.Data).Length > 0 ? DragDropEffects.Copy : DragDropEffects.None;
@@ -198,25 +218,120 @@ namespace ClefExplorer
             _blazorWebView.RootComponents.Add(new RootComponent("#app", typeof(App), parameters: null));
             _blazorWebView.WebView.CoreWebView2InitializationCompleted += WebViewOnCoreWebView2InitializationCompleted;
 
+            // O AllowDrop do formulário só vale onde o formulário aparece — e este controle,
+            // com Dock=Fill, cobre a área de cliente inteira. Sem aceitar o drop AQUI, soltar
+            // um arquivo só funcionava na barra de título, que é área não-cliente.
+            _blazorWebView.AllowDrop = true;
+            _blazorWebView.DragEnter += MainForm_DragEnter;
+            _blazorWebView.DragDrop += MainForm_DragDrop;
+
             Controls.Add(_blazorWebView);
         }
 
         private void WebViewOnCoreWebView2InitializationCompleted(object? sender, CoreWebView2InitializationCompletedEventArgs e)
         {
-            _blazorWebView.WebView.CoreWebView2.IsMuted = true;
-            _blazorWebView.WebView.CoreWebView2.PermissionRequested += CoreWebView2_PermissionRequested;
+            var coreWebView = _blazorWebView.WebView.CoreWebView2;
+            if (!e.IsSuccess || coreWebView is null)
+            {
+                var exception = e.InitializationException
+                    ?? new InvalidOperationException("O WebView2 não retornou uma instância válida.");
+                AppLog.Error("Não foi possível inicializar o WebView2", exception);
+
+                // Evita descartar o controle dentro do próprio callback de inicialização.
+                BeginInvoke(() => ShowWebViewInitializationError(exception));
+                return;
+            }
+
+            coreWebView.IsMuted = true;
+            coreWebView.PermissionRequested += CoreWebView2_PermissionRequested;
 
             // O WebView2 engole o drop por padrão, e a API web não expõe o caminho completo
             // do arquivo. Desabilitando o drop interno, o evento chega ao formulário, que
             // recebe os caminhos reais via DataFormats.FileDrop.
+            //
+            // O efeito colateral é que o flag não desliga só o drop VINDO DE FORA: tira o
+            // WebView2 de alvo de soltura por inteiro, e o arraste dentro da página (agrupar
+            // arrastando a coluna) morre junto — a sessão cai neste formulário, cujo
+            // DragEnter responde "None" por não haver arquivo, e o cursor fica bloqueado.
+            // Por isso a página avisa quando um arraste interno começa e o flag é invertido
+            // só nesse intervalo. Ver wwwroot/js/internal-drag.js.
             try
             {
                 _blazorWebView.WebView.AllowExternalDrop = false;
+                WebViewDropMode.Apply = PermitirArrasteInterno;
             }
             catch (Exception ex)
             {
                 AppLog.Warning("Não foi possível desabilitar o drop interno do WebView2", ex);
             }
+        }
+
+        private void ShowWebViewInitializationError(Exception exception)
+        {
+            if (IsDisposed) return;
+
+            _blazorWebView.Visible = false;
+
+            var panel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 4,
+                Padding = new Padding(48),
+                BackColor = System.Drawing.Color.FromArgb(248, 249, 251),
+            };
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            panel.Controls.Add(new Label
+            {
+                AutoSize = true,
+                Font = new System.Drawing.Font(Font.FontFamily, 18, System.Drawing.FontStyle.Bold),
+                Text = "Não foi possível iniciar o Clef Explorer",
+                Margin = new Padding(0, 0, 0, 16),
+            });
+            panel.Controls.Add(new Label
+            {
+                AutoSize = true,
+                MaximumSize = new System.Drawing.Size(760, 0),
+                Text = "O Microsoft Edge WebView2 Runtime não pôde ser inicializado. "
+                    + "Instale ou repare o runtime e abra o aplicativo novamente.\n\n"
+                    + $"Detalhes: {exception.Message}\nLog de diagnóstico: {AppLog.FilePath}",
+                Margin = new Padding(0, 0, 0, 20),
+            });
+
+            var actions = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                FlowDirection = FlowDirection.LeftToRight,
+                Margin = Padding.Empty,
+            };
+            var download = new Button { AutoSize = true, Text = "Baixar WebView2 Runtime" };
+            download.Click += (_, _) =>
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "https://developer.microsoft.com/microsoft-edge/webview2/",
+                        UseShellExecute = true,
+                    });
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Warning("Não foi possível abrir a página do WebView2", ex);
+                }
+            };
+            var close = new Button { AutoSize = true, Text = "Fechar" };
+            close.Click += (_, _) => Close();
+            actions.Controls.Add(download);
+            actions.Controls.Add(close);
+            panel.Controls.Add(actions);
+
+            Controls.Add(panel);
+            panel.BringToFront();
         }
 
         /// <summary>
@@ -252,6 +367,7 @@ namespace ClefExplorer
         {
             try
             {
+                WebViewDropMode.Apply = null;
                 // Dispose na thread de UI: o BlazorWebView é um controle do WinForms e
                 // descartá-lo em outra thread (como era feito num Task.Run fire-and-forget)
                 // é justamente o tipo de acesso cross-thread que o WinForms não suporta.

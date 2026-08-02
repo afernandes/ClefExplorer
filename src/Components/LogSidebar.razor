@@ -1,4 +1,5 @@
 @using System.IO
+@using ClefExplorer.Helpers
 @using ClefExplorer.Models
 
 <aside class="clef-sidebar">
@@ -49,23 +50,44 @@
             }
         </div>
 
+        @* ShowTime: em log, recortar um pico de erro costuma ser questão de minutos, não
+           de dias. O filtro compara o instante completo — ver LogFilter.From/To. *@
         <div class="clef-section-label">Período</div>
         <div class="clef-period">
             <div>
                 <div class="clef-field-label">De:</div>
-                <OmniDatePicker TValue="DateTime?" Value="DataInicial" ValueChanged="OnDataInicialChanged" Clearable="true" Placeholder="dd/mm/aaaa" />
+                <OmniDatePicker TValue="DateTime?" Value="DataInicial" ValueChanged="OnDataInicialChanged"
+                                ShowTime="true" DateFormat="dd/MM/yyyy HH:mm" Clearable="true"
+                                Placeholder="dd/mm/aaaa hh:mm" />
             </div>
             <div>
                 <div class="clef-field-label">Até:</div>
-                <OmniDatePicker TValue="DateTime?" Value="DataFinal" ValueChanged="OnDataFinalChanged" Clearable="true" Placeholder="dd/mm/aaaa" />
+                <OmniDatePicker TValue="DateTime?" Value="DataFinal" ValueChanged="OnDataFinalChanged"
+                                ShowTime="true" DateFormat="dd/MM/yyyy HH:mm" Clearable="true"
+                                Placeholder="dd/mm/aaaa hh:mm" />
             </div>
         </div>
 
         @if (AvailableFiles != null && AvailableFiles.Any())
         {
             <div class="clef-section-label">Arquivos Carregados</div>
+
+            @* Fora do .clef-tree (que rola): uma pasta com dezenas de logs empurraria o
+               campo de busca para fora da vista justamente quando ele é mais útil. *@
+            <div class="clef-tree-search">
+                <OmniTextBox Value="@_buscaArquivos"
+                             ValueChanged="OnBuscaArquivosChanged"
+                             LeadingIcon="search"
+                             Clearable="true"
+                             Size="ComponentSize.Sm"
+                             Placeholder="Localizar arquivo..." />
+            </div>
+
             <div class="clef-tree">
-                <LogFileTree Files="@AvailableFiles" CheckedFiles="@(VisibleFiles ?? LoadedFiles)" OnSelectionChanged="OnSelectionChanged" />
+                <LogFileTree Files="@AvailableFiles"
+                             CheckedFiles="@(VisibleFiles ?? LoadedFiles)"
+                             OnSelectionChanged="OnSelectionChanged"
+                             Filtro="@_buscaArquivos" />
             </div>
         }
     </div>
@@ -95,6 +117,14 @@
     [Parameter] public EventCallback OnOpenSettings { get; set; }
 
     private bool _abrirOpen;
+
+    /// <summary>
+    /// Termo do campo de busca da árvore. Mora aqui, e não no <c>LogFileTree</c>, porque o
+    /// campo fica fora da área que rola — e some junto com a árvore quando não há arquivos.
+    /// </summary>
+    private string _buscaArquivos = string.Empty;
+
+    private void OnBuscaArquivosChanged(string? valor) => _buscaArquivos = valor ?? string.Empty;
 
     /// <summary>Fecha o popover e dispara a ação do item escolhido.</summary>
     private async Task Exec(Func<Task> action)
@@ -162,6 +192,8 @@
 
     private async Task OnDataFinalChanged(DateTime? value)
     {
+        // Escolher só o dia no calendário deixaria "Até" em 00:00, descartando o dia todo.
+        value = PeriodoFiltro.FimDoDiaAoTrocarDeData(value, DataFinal);
         DataFinal = value;
         await DataFinalChanged.InvokeAsync(value);
     }

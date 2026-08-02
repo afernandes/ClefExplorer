@@ -93,7 +93,7 @@ Utilize a barra lateral esquerda para:
 - **Windows Forms** (Host nativo)
 - **Blazor Hybrid** (Interface de usuário web dentro do desktop)
 - **Microsoft.AspNetCore.Components.WebView.WindowsForms**
-- **Serilog** & **Serilog.Formatting.Compact.Reader** (Parsing de logs)
+- **Serilog** (renderização de message templates; o parsing CLEF é próprio, sobre `Utf8JsonReader`)
 - **Omni.Blazor** (Biblioteca de componentes / design system - pacote NuGet `AndersonN.Omni.Blazor`)
 
 ## 📄 Licença

@@ -12,6 +12,10 @@ namespace ClefExplorer
         {
             Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", Path.GetTempPath() + @"ClefExplorer");
 
+            // Preserve a origem dos caminhos relativos antes de mudar o diretório para a
+            // pasta do executável (necessário no publish single-file).
+            var normalizedArgs = CaminhosEntrada.Normalizar(args, Directory.GetCurrentDirectory());
+
             // Uma segunda instância apenas entrega seus caminhos à janela já aberta e sai.
             // Antes, selecionar N arquivos no Explorer abria N janelas.
             //
@@ -20,7 +24,7 @@ namespace ClefExplorer
             // usuário sem conseguir usar o aplicativo. Nesse caso seguimos como instância
             // independente — mesma escolha feita quando o próprio mutex falha.
             if (!SingleInstance.TryAcquire(out var singleInstance)
-                && SingleInstance.SendToExistingInstance(args))
+                && SingleInstance.SendToExistingInstance(normalizedArgs))
             {
                 return;
             }
@@ -36,23 +40,32 @@ namespace ClefExplorer
             services.AddSingleton<AppStorage>();
             services.AddSingleton<WindowPlacementService>();
             services.AddSingleton<UiPreferencesService>();
+            services.AddSingleton<DescobertaArquivosLog>();
+            services.AddSingleton<ILeitorArquivoLog, LeitorArquivoLog>();
+            services.AddSingleton<FiltroArquivosLogIgnorados>();
             services.AddSingleton<LogStore>();
+            services.AddSingleton<ConsultaLogs>();
             services.AddSingleton<LogGroupService>();
             services.AddSingleton<SettingsService>();
             services.AddSingleton<IFilePickerService, WinFormsFilePickerService>();
             services.AddSingleton<FileAssociationService>();
+            services.AddSingleton<ExploradorArquivos>();
 
 #if DEBUG
             services.AddBlazorWebViewDeveloperTools();
 #endif
 
-            var serviceProvider = services.BuildServiceProvider();
+            using var serviceProvider = services.BuildServiceProvider(new ServiceProviderOptions
+            {
+                ValidateOnBuild = true,
+                ValidateScopes = true,
+            });
 
             // Todos os argumentos, não só o primeiro: abrir vários .clef de uma vez
             // carrega todos na mesma janela.
             using (singleInstance)
             {
-                var form = new MainForm(serviceProvider, args);
+                var form = new MainForm(serviceProvider, normalizedArgs);
                 singleInstance?.StartListening(form.ReceivePathsFromOtherInstance);
                 Application.Run(form);
             }
@@ -72,18 +85,16 @@ namespace ClefExplorer
                 if (!string.IsNullOrEmpty(directoryPath))
                 {
                     Directory.SetCurrentDirectory(directoryPath);
-                    var currentDirectory = Directory.GetCurrentDirectory();
-                    Console.WriteLine($"CURRENT DIRECTORY: {currentDirectory}");
+                    AppLog.Info($"Diretório atual: {Directory.GetCurrentDirectory()}");
                 }
                 else
                 {
-                    Console.WriteLine("WARNING: Could not determine application directory path.");
+                    AppLog.Warning("Não foi possível determinar a pasta do aplicativo.");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine("ERROR ON SET CURRENT DIRECTORY: " + ex.Message);
-                Console.WriteLine(ex.ToString());
+                AppLog.Warning("Não foi possível ajustar o diretório atual do aplicativo", ex);
             }
         }
 

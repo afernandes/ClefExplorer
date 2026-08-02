@@ -416,3 +416,6 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Capturas do Playwright MCP durante a inspeção da UI — depuração, nunca fonte.
+.playwright-mcp/
