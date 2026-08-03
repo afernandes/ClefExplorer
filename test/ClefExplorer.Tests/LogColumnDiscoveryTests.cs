@@ -13,19 +13,18 @@ public class LogColumnDiscoveryTests
 {
     private static ClefEvent Event(params (string Key, object Value)[] props)
     {
-        var ev = new ClefEvent
+        var propriedades = new Dictionary<string, LogEventPropertyValue>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in props)
+        {
+            propriedades[key] = new ScalarValue(value);
+        }
+
+        return new ClefEvent
         {
             Level = "Information",
             Timestamp = DateTimeOffset.UtcNow,
-            Properties = new Dictionary<string, LogEventPropertyValue>(StringComparer.OrdinalIgnoreCase),
+            Properties = propriedades,
         };
-
-        foreach (var (key, value) in props)
-        {
-            ev.Properties![key] = new ScalarValue(value);
-        }
-
-        return ev;
     }
 
     // --- Descoberta --------------------------------------------------------------

@@ -268,4 +268,90 @@ public class LeitorArquivoLogTests : IDisposable
 
         Assert.All(totais, t => Assert.Equal(200, t));
     }
+
+    // ── Leitura paralela de um arquivo grande ───────────────────────────────────
+    //
+    // Acima do limiar, o arquivo é dividido em segmentos alinhados à quebra de linha e
+    // cada um é lido num worker. O contrato é EQUIVALÊNCIA TOTAL com o caminho sequencial:
+    // mesmos eventos, na mesma ordem, mesmas linhas inválidas, mesmo offset. Os testes
+    // usam limiar/segmento minúsculos para exercitar o caminho com arquivos de KB.
+
+    private string GerarArquivoParaleloTeste(int linhas, bool comBom, bool crlf, bool semQuebraFinal)
+    {
+        var caminho = Path.Combine(_pasta, Guid.NewGuid().ToString("N") + ".clef");
+        var sb = new StringBuilder();
+        for (var i = 0; i < linhas; i++)
+        {
+            if (i % 97 == 3)
+            {
+                sb.Append("{ isto nao e um evento CLEF }");   // inválida no meio
+            }
+            else if (i % 53 == 7)
+            {
+                // linha longa: um @x de vários KB atravessa fronteiras de segmento
+                sb.Append("{\"@t\":\"2026-07-01T00:00:")
+                  .Append((i % 60).ToString("00"))
+                  .Append("Z\",\"@mt\":\"grande {N}\",\"N\":").Append(i)
+                  .Append(",\"@x\":\"").Append(new string('x', 4000)).Append("\"}");
+            }
+            else
+            {
+                sb.Append("{\"@t\":\"2026-07-01T00:00:")
+                  .Append((i % 60).ToString("00"))
+                  .Append("Z\",\"@mt\":\"evento {N}\",\"N\":").Append(i).Append('}');
+            }
+
+            if (!semQuebraFinal || i < linhas - 1) sb.Append(crlf ? "\r\n" : "\n");
+        }
+
+        var corpo = Encoding.UTF8.GetBytes(sb.ToString());
+        using var fs = File.Create(caminho);
+        if (comBom) fs.Write(new byte[] { 0xEF, 0xBB, 0xBF });
+        fs.Write(corpo);
+        return caminho;
+    }
+
+    private static async Task CompararComSequencialAsync(string caminho)
+    {
+        // Limiar alto = nunca paralelo; limiar 1 = sempre paralelo, com segmentos de 2 KB.
+        var sequencial = await new LeitorArquivoLog(limiarParalelo: long.MaxValue, segmentoMinimo: 1)
+            .LerAsync(caminho, Array.Empty<string>());
+        var paralelo = await new LeitorArquivoLog(limiarParalelo: 1, segmentoMinimo: 2048)
+            .LerAsync(caminho, Array.Empty<string>());
+
+        Assert.Equal(sequencial.Eventos.Count, paralelo.Eventos.Count);
+        for (var i = 0; i < sequencial.Eventos.Count; i++)
+        {
+            Assert.Equal(sequencial.Eventos[i].Message, paralelo.Eventos[i].Message);
+            Assert.Equal(sequencial.Eventos[i].Timestamp, paralelo.Eventos[i].Timestamp);
+        }
+        Assert.Equal(sequencial.LinhasInvalidas, paralelo.LinhasInvalidas);
+        Assert.Equal(sequencial.PrimeiroErro, paralelo.PrimeiroErro);
+        Assert.Equal(sequencial.OffsetFinal, paralelo.OffsetFinal);
+    }
+
+    [Fact]
+    public async Task Parallel_reading_is_indistinguishable_from_sequential()
+    {
+        var caminho = GerarArquivoParaleloTeste(2_000, comBom: false, crlf: false, semQuebraFinal: false);
+        await CompararComSequencialAsync(caminho);
+    }
+
+    [Fact]
+    public async Task Parallel_reading_handles_bom_crlf_and_a_missing_final_newline()
+    {
+        // BOM só existe no segmento 0; CRLF e a última linha sem quebra são dos workers
+        // das pontas — os três juntos cobrem as costuras entre segmentos.
+        var caminho = GerarArquivoParaleloTeste(1_500, comBom: true, crlf: true, semQuebraFinal: true);
+        await CompararComSequencialAsync(caminho);
+    }
+
+    [Fact]
+    public async Task A_line_longer_than_a_whole_segment_still_comes_out_once()
+    {
+        // Segmento de 2 KB com linhas de 4 KB: toda fronteira bruta cai DENTRO de alguma
+        // linha, o que força o alinhamento a atravessar segmentos inteiros.
+        var caminho = GerarArquivoParaleloTeste(300, comBom: false, crlf: false, semQuebraFinal: false);
+        await CompararComSequencialAsync(caminho);
+    }
 }

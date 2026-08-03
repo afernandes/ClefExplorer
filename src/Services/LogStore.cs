@@ -68,6 +68,13 @@ namespace ClefExplorer.Services
 
         public bool IsLoading => Volatile.Read(ref _isLoading) == 1;
 
+        /// <summary>
+        /// Intervalo mínimo entre publicações parciais durante a carga. 400 ms equilibra
+        /// "ver os primeiros eventos cedo" com o custo de cada mesclagem (que copia o
+        /// conjunto publicado). Os testes zeram para publicar a cada arquivo concluído.
+        /// </summary>
+        public int PublicacaoParcialMs { get; set; } = 400;
+
         public int Count => Volatile.Read(ref _events).Length;
 
         /// <summary>
@@ -153,12 +160,66 @@ namespace ClefExplorer.Services
                 var intervaloProgresso = Math.Max(1, arquivosCarregar.Length / 20);
                 ReportProgress(operacao, $"Lendo 0/{arquivosCarregar.Length:N0} arquivos…");
 
+                // Publicação incremental: cada arquivo concluído entra numa fila e, no
+                // máximo a cada PublicacaoParcialMs, o que acumulou é mesclado no conjunto
+                // publicado. Quem abre uma pasta grande passa a LER os primeiros eventos em
+                // segundos, com o resto chegando por baixo — antes a tela ficava num
+                // spinner até o último arquivo terminar.
+                var lotesPendentes = new ConcurrentQueue<IReadOnlyList<ClefEvent>>();
+                var ultimaPublicacao = Environment.TickCount64;
+                var publicando = 0;
+                var metadadosPublicados = false;
+
+                void PublicarParcial()
+                {
+                    if (Environment.TickCount64 - Volatile.Read(ref ultimaPublicacao) < PublicacaoParcialMs) return;
+                    // Um publicador por vez; quem perder a corrida deixa o lote na fila
+                    // para a próxima rodada — nada se perde, só atrasa um ciclo.
+                    if (Interlocked.Exchange(ref publicando, 1) == 1) return;
+                    try
+                    {
+                        var lote = new List<ClefEvent>();
+                        while (lotesPendentes.TryDequeue(out var parte)) lote.AddRange(parte);
+                        if (lote.Count == 0) return;
+                        lote.Sort(PorTimestampDecrescente);
+
+                        lock (_stateGate)
+                        {
+                            if (!IsCurrent(operacao)) return;
+
+                            // O primeiro lote leva junto os metadados da carga: eventos
+                            // novos ao lado da lista de arquivos da sessão ANTERIOR seria
+                            // um estado que nenhuma outra parte do app sabe interpretar.
+                            if (!metadadosPublicados)
+                            {
+                                metadadosPublicados = true;
+                                _fileName = pathList.Length == 1 ? pathList[0] : "Múltiplos locais";
+                                Volatile.Write(ref _openedPaths, pathList);
+                                Volatile.Write(ref _availableFiles, descoberta.Arquivos.ToArray());
+                                Volatile.Write(ref _loadedFiles, arquivosCarregar);
+                                Volatile.Write(ref _events, Array.Empty<ClefEvent>());
+                            }
+
+                            Volatile.Write(ref _events, MesclarPorRegiao(Volatile.Read(ref _events), lote));
+                            Interlocked.Increment(ref _stateVersion);
+                        }
+
+                        Volatile.Write(ref ultimaPublicacao, Environment.TickCount64);
+                        Changed?.Invoke();
+                    }
+                    finally
+                    {
+                        Volatile.Write(ref publicando, 0);
+                    }
+                }
+
                 await Parallel.ForEachAsync(arquivosCarregar, opcoes, async (arquivo, token) =>
                 {
                     try
                     {
                         var leitura = await _leitor.LerAsync(arquivo, textosIgnorados, pool, token).ConfigureAwait(false);
                         foreach (var evento in leitura.Eventos) eventos.Add(evento);
+                        if (leitura.Eventos.Count > 0) lotesPendentes.Enqueue(leitura.Eventos);
                         if (leitura.OffsetFinal is { } offset) offsets[arquivo] = offset;
 
                         if (leitura.LinhasInvalidas > 0)
@@ -178,6 +239,7 @@ namespace ClefExplorer.Services
                     }
                     finally
                     {
+                        PublicarParcial();
                         var processados = Interlocked.Increment(ref arquivosLidos);
                         if (processados == arquivosCarregar.Length || processados % intervaloProgresso == 0)
                         {
@@ -324,6 +386,7 @@ namespace ClefExplorer.Services
                         {
                             _fileOffsets.Remove(arquivo);
                             _oversizedTailScanOffsets.Remove(arquivo);
+                            _ultimaAtividadeTail.Remove(arquivo);
                         }
 
                         foreach (var offset in offsets) _fileOffsets[offset.Key] = offset.Value;
@@ -449,12 +512,28 @@ namespace ClefExplorer.Services
 
         private readonly Dictionary<string, long> _fileOffsets = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, long> _oversizedTailScanOffsets = new(StringComparer.OrdinalIgnoreCase);
+
+        // Tick (Environment.TickCount64) da última vez que cada arquivo moveu o offset no
+        // poll. Enquanto está dentro da janela, o arquivo é aberto TODO tick, ignorando o
+        // tamanho enumerado — que é stale para arquivos mantidos abertos pelo logger.
+        private readonly Dictionary<string, long> _ultimaAtividadeTail = new(StringComparer.OrdinalIgnoreCase);
+        private int _rodizioTail;
+
         private CancellationTokenSource? _tailCts;
         private Task? _tailTask;
         private int _tailEnabled;
         private PoolDeTextos? _poolSessao;
 
         private static readonly TimeSpan TailInterval = TimeSpan.FromSeconds(1);
+
+        // Janela em que um arquivo que acabou de entregar continua sendo aberto todo tick
+        // (latência de 1 s durante rajadas), e quantos arquivos "frios" cada tick abre no
+        // rodízio mesmo com a enumeração dizendo "nada mudou". As duas constantes trabalham
+        // juntas contra o índice stale: o Auditing do PDV escreve a cada ~30 s, então 60 s o
+        // mantém sempre quente; um arquivo quieto há mais tempo volta a ser visto em até
+        // total/fatia ticks (104 arquivos ÷ 8 = 13 s) e é promovido a quente na hora.
+        private const long JanelaAtividadeTailMs = 60_000;
+        private const int FatiaDoRodizioTail = 8;
 
         // A procura por arquivos novos tem cadência PRÓPRIA porque ela custa uma varredura
         // recursiva da árvore que o usuário abriu (medida em 29 s numa pasta com 738 mil
@@ -669,8 +748,11 @@ namespace ClefExplorer.Services
             var novos = new List<ClefEvent>();
             var novosOffsets = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var arquivo in arquivos)
+            var agora = Environment.TickCount64;
+            var inicioRodizio = _rodizioTail;
+            for (var i = 0; i < arquivos.Length; i++)
             {
+                var arquivo = arquivos[i];
                 cancellationToken.ThrowIfCancellationRequested();
                 if (arquivo.EndsWith(".gz", StringComparison.OrdinalIgnoreCase)) continue;
 
@@ -679,7 +761,23 @@ namespace ClefExplorer.Services
                 // avança sem o arquivo crescer, e um portão por variação deixaria o resto do
                 // arquivo preso para sempre. Tamanho menor que o offset também abre — é
                 // truncamento, e a releitura precisa reposicionar no início.
-                if (tamanhos.TryGetValue(arquivo, out var tamanho) && tamanho == OffsetLido(arquivo)) continue;
+                //
+                // ATENÇÃO: o tamanho enumerado vem do ÍNDICE DO DIRETÓRIO, que o NTFS só
+                // atualiza de vez em quando enquanto o logger mantém o arquivo aberto — no
+                // PDV real a enumeração devolvia o tamanho da carga indefinidamente e o modo
+                // ao vivo morria em silêncio (o harness sintético não pegava: o escritor de
+                // teste fecha o arquivo a cada linha, o que atualiza o índice). Só o handle
+                // (FileStream.Length) diz o tamanho verdadeiro. Por isso o portão nunca é a
+                // única palavra: arquivo com atividade recente é aberto todo tick, e os
+                // demais passam por um rodízio que abre uma fatia por tick — nenhum arquivo
+                // fica invisível para sempre atrás do índice stale.
+                if (tamanhos.TryGetValue(arquivo, out var tamanho)
+                    && tamanho == OffsetLido(arquivo)
+                    && !TeveAtividadeRecente(arquivo, agora)
+                    && !NaFatiaDoRodizio(i, inicioRodizio, arquivos.Length))
+                {
+                    continue;
+                }
 
                 try
                 {
@@ -689,7 +787,11 @@ namespace ClefExplorer.Services
                         pool,
                         cancellationToken).ConfigureAwait(false);
                     novos.AddRange(trecho.Eventos);
-                    if (trecho.NovoOffset is { } offset) novosOffsets[arquivo] = offset;
+                    if (trecho.NovoOffset is { } offset)
+                    {
+                        novosOffsets[arquivo] = offset;
+                        MarcarAtividadeTail(arquivo, agora);
+                    }
                 }
                 catch (OperationCanceledException)
                 {
@@ -699,6 +801,11 @@ namespace ClefExplorer.Services
                 {
                     AppLog.Warning($"Falha ao acompanhar '{arquivo}'", ex);
                 }
+            }
+
+            if (arquivos.Length > 0)
+            {
+                _rodizioTail = (inicioRodizio + FatiaDoRodizioTail) % arquivos.Length;
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -771,6 +878,31 @@ namespace ClefExplorer.Services
             }
         }
 
+        private bool TeveAtividadeRecente(string arquivo, long agora)
+        {
+            lock (_fileOffsets)
+            {
+                return _ultimaAtividadeTail.TryGetValue(arquivo, out var ultimo)
+                    && agora - ultimo < JanelaAtividadeTailMs;
+            }
+        }
+
+        private void MarcarAtividadeTail(string arquivo, long agora)
+        {
+            lock (_fileOffsets) { _ultimaAtividadeTail[arquivo] = agora; }
+        }
+
+        // Fatia circular [inicio, inicio+fatia) sobre a lista de arquivos; com poucos
+        // arquivos todos entram todo tick.
+        private static bool NaFatiaDoRodizio(int indice, int inicio, int total)
+        {
+            if (total <= FatiaDoRodizioTail) return true;
+            var fim = (inicio + FatiaDoRodizioTail) % total;
+            return inicio <= fim
+                ? indice >= inicio && indice < fim
+                : indice >= inicio || indice < fim;
+        }
+
         private sealed record ResultadoTail(IReadOnlyList<ClefEvent> Eventos, long? NovoOffset);
 
         private async Task<ResultadoTail> ReadNewEventsAsync(
@@ -794,6 +926,22 @@ namespace ClefExplorer.Services
             {
                 offset = 0;
                 lock (_fileOffsets) { _oversizedTailScanOffsets.Remove(arquivo); }
+            }
+            else if (offset > 0 && stream.Length > offset)
+            {
+                // Truncado e reescrito MAIOR que o offset antigo — a única rotação que a
+                // comparação de tamanho não enxerga (pego por prova de ponta a ponta: o
+                // conteúdo novo era maior que o antigo e o tail lia do meio de uma linha,
+                // descartando-a como inválida). O offset avança sempre até logo depois de
+                // um '\n'; se o byte anterior não é '\n', o conteúdo sob o offset não é o
+                // que foi lido antes.
+                stream.Seek(offset - 1, SeekOrigin.Begin);
+                if (stream.ReadByte() != '\n')
+                {
+                    offset = 0;
+                    stream.Seek(0, SeekOrigin.Begin);
+                    lock (_fileOffsets) { _oversizedTailScanOffsets.Remove(arquivo); }
+                }
             }
             if (stream.Length == offset) return new ResultadoTail(Array.Empty<ClefEvent>(), null);
 
@@ -898,6 +1046,7 @@ namespace ClefExplorer.Services
             {
                 _fileOffsets.Clear();
                 _oversizedTailScanOffsets.Clear();
+                _ultimaAtividadeTail.Clear();
                 foreach (var arquivo in arquivosCarregados)
                 {
                     if (offsets.TryGetValue(arquivo, out var offset)) _fileOffsets[arquivo] = offset;
