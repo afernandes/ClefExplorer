@@ -634,10 +634,11 @@ public class LogStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task Cancelling_a_load_preserves_the_previous_content()
+    public async Task Cancelling_a_load_never_mixes_the_two_sessions()
     {
-        // O estado só é trocado ao final de uma leitura completa, então um
-        // carregamento abortado não pode deixar a lista pela metade.
+        // Com a publicação incremental, cancelar no meio PODE deixar um parcial da carga
+        // nova — é o que o usuário estava lendo quando cancelou. O que continua proibido
+        // é o meio-termo entre SESSÕES: eventos antigos e novos no mesmo conjunto.
         WriteClef("pequeno.clef", ClefLine("conteúdo anterior"));
         var store = NewStore();
         await store.LoadFromFolderAsync(_root);
@@ -650,9 +651,73 @@ public class LogStoreTests : IDisposable
         store.CancelLoad();
         await carregando;
 
-        // Ou o conteúdo anterior (cancelou a tempo) ou o novo completo — nunca um meio-termo.
-        Assert.True(store.Count == 1 || store.Count == 40_000, $"estado inconsistente: {store.Count}");
+        var snapshot = store.Snapshot();
+        if (snapshot.Length == 1 && snapshot[0].Message == "conteúdo anterior")
+        {
+            // Cancelou antes do primeiro lote parcial: sessão anterior intacta.
+        }
+        else
+        {
+            // Publicou parcial (ou completou): tudo tem que ser da carga NOVA.
+            Assert.DoesNotContain(snapshot, e => e.Message == "conteúdo anterior");
+        }
         Assert.False(store.IsLoading);
+    }
+
+    [Fact]
+    public async Task A_load_publishes_events_before_finishing()
+    {
+        // O ponto da carga incremental: com um arquivo entregue e outro ainda em leitura,
+        // o que já chegou aparece — antes, a tela ficava vazia até o último arquivo.
+        var rapido = WriteClef("rapido.clef", ClefLine("do arquivo rápido"));
+        var lento = WriteClef("lento.clef", ClefLine("do arquivo lento"));
+
+        // No fake, o "segundo" arquivo fica preso até LiberarSegundo; o rápido entrega na
+        // hora (e vira um evento cujo Message é o NOME do arquivo).
+        var leitor = new LeitorControlado(
+            Path.Combine(_root, "nunca-usado.clef"),
+            lento);
+        var store = NewStore(leitor);
+        store.PublicacaoParcialMs = 0; // publica a cada arquivo concluído
+
+        var carga = store.LoadFromFolderAsync(_root);
+        await leitor.SegundoIniciado.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Espera o lote parcial do arquivo rápido ser publicado.
+        var limite = DateTime.UtcNow.AddSeconds(10);
+        while (store.Count == 0 && DateTime.UtcNow < limite)
+        {
+            await Task.Delay(25);
+        }
+
+        Assert.True(store.IsLoading, "a carga já tinha terminado — o parcial não foi observável");
+        Assert.Equal(1, store.Count);
+        Assert.Equal("rapido.clef", store.Snapshot()[0].Message);
+        // Os metadados acompanham o primeiro lote: a lista de arquivos é a da carga NOVA.
+        Assert.Contains(store.LoadedFiles, f => f.EndsWith("rapido.clef", StringComparison.OrdinalIgnoreCase));
+        GC.KeepAlive(rapido);
+
+        leitor.LiberarSegundo.SetResult();
+        await carga;
+
+        Assert.Equal(2, store.Count);
+        Assert.False(store.IsLoading);
+    }
+
+    [Fact]
+    public async Task Partial_batches_do_not_duplicate_events_in_the_final_set()
+    {
+        // A publicação final substitui o conjunto pelo total ordenado; um evento que
+        // apareceu num lote parcial não pode aparecer duas vezes ao terminar.
+        WriteClef("a.clef", ClefLine("um"), ClefLine("dois"));
+        WriteClef("b.clef", ClefLine("três"));
+        var store = NewStore();
+        store.PublicacaoParcialMs = 0;
+
+        await store.LoadFromFolderAsync(_root);
+
+        Assert.Equal(3, store.Count);
+        Assert.Equal(3, store.Snapshot().Select(e => e.Message).Distinct().Count());
     }
 
     [Fact]
@@ -743,6 +808,45 @@ public class LogStoreTests : IDisposable
 
             Assert.True(await WaitUntil(() => store.Count == 2), "o evento novo não foi captado");
             Assert.Contains(store.Snapshot(), e => e.Message == "apareceu depois");
+        }
+        finally
+        {
+            store.SetTailEnabled(false);
+        }
+    }
+
+    [Fact]
+    public async Task Tail_picks_up_lines_from_a_writer_that_keeps_the_file_open()
+    {
+        // O cenário do PDV real: o logger abre o arquivo UMA vez e nunca fecha. Enquanto o
+        // handle está aberto, o tamanho no índice do diretório (o que a enumeração do poll
+        // enxerga) pode ficar congelado no valor antigo — só o handle diz o tamanho real.
+        // O gate do poll não pode confiar na enumeração como prova de "nada mudou".
+        var file = WriteClef("app.clef", ClefLine("inicial"));
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+        Assert.Equal(1, store.Count);
+
+        await using var escritor = new FileStream(
+            file, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+
+        store.SetTailEnabled(true);
+        try
+        {
+            var linha = Encoding.UTF8.GetBytes(ClefLine("do handle aberto") + "\n");
+            await escritor.WriteAsync(linha);
+            await escritor.FlushAsync();
+
+            Assert.True(await WaitUntil(() => store.Count == 2), "o evento do escritor de handle aberto não foi captado");
+            Assert.Contains(store.Snapshot(), e => e.Message == "do handle aberto");
+
+            // Segunda rajada com o MESMO handle: o arquivo agora está "quente" e precisa
+            // continuar sendo lido tick a tick.
+            var linha2 = Encoding.UTF8.GetBytes(ClefLine("segunda rajada") + "\n");
+            await escritor.WriteAsync(linha2);
+            await escritor.FlushAsync();
+
+            Assert.True(await WaitUntil(() => store.Count == 3), "a segunda rajada não foi captada");
         }
         finally
         {
@@ -920,6 +1024,40 @@ public class LogStoreTests : IDisposable
 
             Assert.True(await WaitUntil(() => store.Snapshot().Any(e => e.Message == "depois da rotação")),
                 "o conteúdo pós-rotação não foi captado");
+        }
+        finally
+        {
+            store.SetTailEnabled(false);
+        }
+    }
+
+    [Fact]
+    public async Task Tail_detects_a_file_rewritten_LARGER_than_the_old_offset()
+    {
+        // O caso que a comparação de tamanho não enxerga — pego por prova de ponta a
+        // ponta, com os testes acima verdes: se a rotação reescreve o arquivo com MAIS
+        // bytes que o offset antigo, `Length < offset` é falso e o tail lia do meio de
+        // uma linha, descartando-a como inválida. A detecção agora usa o invariante de
+        // que o offset sempre para logo depois de um '\n'.
+        var file = WriteClef("app.clef", ClefLine("curto"));
+        var store = NewStore();
+        await store.LoadFromFolderAsync(_root);
+        Assert.Equal(1, store.Count);
+
+        store.SetTailEnabled(true);
+        try
+        {
+            // Reescrito de uma vez, com conteúdo maior que o arquivo original inteiro.
+            File.WriteAllText(
+                file,
+                ClefLine("primeira linha bem mais longa que o conteúdo antigo do arquivo") + Environment.NewLine
+                + ClefLine("segunda linha depois da rotação") + Environment.NewLine);
+
+            Assert.True(
+                await WaitUntil(() => store.Snapshot().Any(
+                    e => e.Message == "primeira linha bem mais longa que o conteúdo antigo do arquivo")),
+                "a primeira linha do arquivo reescrito foi perdida");
+            Assert.Contains(store.Snapshot(), e => e.Message == "segunda linha depois da rotação");
         }
         finally
         {
