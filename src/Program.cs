@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ClefExplorer.Services;
 using Omni.Blazor;
+using Velopack;
 
 namespace ClefExplorer
 {
@@ -10,6 +11,13 @@ namespace ClefExplorer
         [STAThread]
         static void Main(string[] args)
         {
+            // PRIMEIRA linha do Main, antes de qualquer outra coisa: é aqui que o Velopack
+            // trata os hooks de instalação/atualização (o instalador reexecuta o próprio
+            // executável com argumentos próprios e espera que ele saia). Qualquer código
+            // antes disto — inclusive o mutex de instância única — rodaria durante a
+            // instalação e poderia travá-la.
+            VelopackApp.Build().Run();
+
             Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", Path.GetTempPath() + @"ClefExplorer");
 
             // Preserve a origem dos caminhos relativos antes de mudar o diretório para a
@@ -50,6 +58,10 @@ namespace ClefExplorer
             services.AddSingleton<IFilePickerService, WinFormsFilePickerService>();
             services.AddSingleton<FileAssociationService>();
             services.AddSingleton<ExploradorArquivos>();
+            services.AddSingleton<IAtualizadorLocal, AtualizadorVelopack>();
+            services.AddSingleton<IConsultorReleases>(
+                _ => new ConsultorReleasesGithub(ConsultorReleasesGithub.CriarCliente()));
+            services.AddSingleton<ServicoAtualizacao>();
 
 #if DEBUG
             services.AddBlazorWebViewDeveloperTools();

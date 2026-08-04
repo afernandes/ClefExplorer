@@ -1,7 +1,15 @@
-name: Release to Microsoft Store
+name: Release
 
 # Dispara ao publicar uma tag "v*" (ex.: v1.2.3) ou manualmente pela aba Actions.
-# Pré-requisitos (configurar uma única vez em Settings > Secrets and variables > Actions):
+#
+# Dois canais, propositalmente independentes:
+#   github - CANAL OFICIAL. Publica o instalador nos Releases e é de onde o aplicativo se
+#            atualiza sozinho (ver ServicoAtualizacao). Não depende de secret nenhum.
+#   store  - Microsoft Store. Passa por análise e costuma sair depois. Um MSIX da Store e um
+#            pacote assinado localmente têm identidades diferentes, então um NUNCA atualiza o
+#            outro: quem instalou pela Store é apenas avisado da versão nova.
+#
+# Pré-requisitos do job da Store (Settings > Secrets and variables > Actions):
 #   AZURE_AD_TENANT_ID          - Tenant do Microsoft Entra ID associado ao Partner Center
 #   AZURE_AD_APPLICATION_CLIENT_ID - Client ID do app do Entra ID
 #   AZURE_AD_APPLICATION_SECRET    - Client secret desse app
@@ -26,6 +34,75 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  github:
+    name: Publish installer to GitHub Releases
+    runs-on: windows-latest
+    # O canal oficial anexa arquivos ao release — o único job que escreve no repositório.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $raw = '${{ github.event.inputs.version }}'
+          if ([string]::IsNullOrWhiteSpace($raw)) { $raw = '${{ github.ref_name }}' }
+          $raw = $raw.TrimStart('v','V')
+          if ($raw -notmatch '^\d+\.\d+(\.\d+){0,2}$') {
+            throw "Versão inválida: '$raw'. Use algo como v1.2.3 ou 1.2.3."
+          }
+          "version=$raw" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Versão: $raw"
+
+      - name: Install vpk
+        run: dotnet tool install -g vpk
+
+      # SEM PublishSingleFile: o Velopack empacota o conteúdo da pasta e monta atualizações
+      # incrementais comparando arquivo a arquivo. Num executável único, qualquer mudança
+      # reescreve o binário inteiro e todo update volta a baixar ~150 MB.
+      - name: Publish (win-x64)
+        run: >
+          dotnet publish src/ClefExplorer.csproj
+          -c Release
+          -r win-x64
+          --self-contained
+          -p:PublishSingleFile=false
+          -o publish
+
+      # Traz os pacotes já publicados para o vpk conseguir gerar o delta desta versão.
+      # Na primeira execução não há o que baixar e o comando segue sem erro.
+      - name: Download previous releases
+        continue-on-error: true
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build installer
+        run: >
+          vpk pack
+          --packId ClefExplorer
+          --packVersion ${{ steps.ver.outputs.version }}
+          --packDir publish
+          --mainExe ClefExplorer.exe
+          --packAuthors "Anderson Fernandes do Nascimento"
+          --icon src/app.ico
+
+      # Anexa Setup.exe, .nupkg e releases.win.json ao release da tag. O manifesto é o que o
+      # aplicativo instalado lê para descobrir que existe versão nova.
+      - name: Upload to GitHub Release
+        run: >
+          vpk upload github
+          --repoUrl https://github.com/${{ github.repository }}
+          --token ${{ secrets.GITHUB_TOKEN }}
+          --tag ${{ github.ref_name }}
+          --releaseName "ClefExplorer ${{ steps.ver.outputs.version }}"
+          --publish
+
   store:
     name: Package MSIX & publish to Store
     runs-on: windows-latest

@@ -41,6 +41,10 @@
          Newtonsoft que vinha com ele). Do Serilog continuam em uso o MessageTemplate/
          MessageTemplateParser, os LogEventPropertyValue e o JsonValueFormatter da exportação. -->
     <PackageReference Include="Serilog" Version="4.4.0" />
+    <!-- Auto-atualização pelo canal oficial (Releases do GitHub). Só tem efeito em quem
+         instalou pelo Setup: no pacote da Store e no executável avulso o app apenas avisa
+         que há versão nova — ver ServicoAtualizacao. -->
+    <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>
 
 	<ItemGroup>
