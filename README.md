@@ -5,10 +5,23 @@ O **ClefExplorer** é uma aplicação desktop moderna desenvolvida para facilita
 ![screenshot](screenshot.png?raw=true "Screenshot")
 
 ## Download
-As versões estão disponíveis neste repositório do GitHub junto com a Windows Store
 
-### Windows
+### Instalador (recomendado)
+
+Baixe o **ClefExplorer-win-Setup.exe** na [página de releases](https://github.com/afernandes/ClefExplorer/releases/latest).
+Instala para o usuário atual (sem pedir administrador) e **se mantém atualizado sozinho**: a
+cada abertura o aplicativo procura versão nova, baixa em segundo plano e aplica no reinício.
+
+Também há o `ClefExplorer-win-Portable.zip`, para rodar sem instalar — este não se atualiza
+sozinho, apenas avisa quando sai versão nova.
+
+### Microsoft Store
+
 <a href='https://www.microsoft.com/store/apps/9MVZN1HVJ230?cid=storebadge&ocid=badge'><img src='English_get-it-from-MS_InvariantCulture_Default.png' alt='English badge' style='height: 38px;' height="38" /></a>
+
+A versão da Store é atualizada pelo próprio Windows, mas cada envio passa por análise e
+costuma sair alguns dias depois do GitHub — que é o canal oficial. Por isso o aplicativo
+avisa quando há versão nova publicada aqui, com um link para o release.
 
 
 ## 🚀 Funcionalidades Principais

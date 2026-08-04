@@ -14,6 +14,8 @@
 @inject NotificationService Notifications
 @inject UiPreferencesService UiPreferences
 @inject ConsultaLogs Consulta
+@inject ServicoAtualizacao Atualizacao
+@inject ExploradorArquivos Explorador
 @inject IJSRuntime JS
 
 <div class="clef-root">
@@ -30,6 +32,29 @@
             </ChildContent>
             <Actions>
                 <OmniButton Text="Definir como padrão" Size="ComponentSize.Sm" Variant="ButtonVariant.Primary" OnClick="SetAsDefaultApp" />
+            </Actions>
+        </OmniBanner>
+    }
+
+    @if (_atualizacao is { } atualizacao && !_avisoAtualizacaoDispensado)
+    {
+        <OmniBanner Severity="NotificationSeverity.Info" Dismissible="true" OnClosed="DispensarAvisoAtualizacao">
+            <ChildContent>
+                A versão @atualizacao.Versao do Clef Explorer está disponível.
+                @if (atualizacao.PodeReiniciar)
+                {
+                    <text> Ela já foi baixada e será aplicada ao reiniciar.</text>
+                }
+            </ChildContent>
+            <Actions>
+                @if (atualizacao.PodeReiniciar)
+                {
+                    <OmniButton Text="Reiniciar agora" Size="ComponentSize.Sm" Variant="ButtonVariant.Primary" OnClick="AplicarAtualizacao" />
+                }
+                else
+                {
+                    <OmniButton Text="Ver no GitHub" Size="ComponentSize.Sm" Variant="ButtonVariant.Primary" OnClick="AbrirPaginaDaAtualizacao" />
+                }
             </Actions>
         </OmniBanner>
     }
@@ -230,6 +255,8 @@
     private DateTime? _dataInicial;
     private DateTime? _dataFinal;
     private bool _showDefaultAppNotification;
+    private InfoAtualizacao? _atualizacao;
+    private bool _avisoAtualizacaoDispensado;
     private bool _isExporting;
     private int _eventosExportados;
     private int _totalExportacao;
@@ -395,6 +422,11 @@
             AplicarFiltros();
         }
 
+        Atualizacao.Changed += OnAtualizacaoEncontrada;
+        // Uma verificação que já tenha terminado antes deste componente existir (o serviço
+        // é singleton e sobrevive a recargas da UI) não dispara o evento de novo.
+        _atualizacao = Atualizacao.Disponivel;
+
         CheckDefaultApp();
         ReportarErrosDeInicializacao();
     }
@@ -524,6 +556,10 @@
             // mas o resto do app não é afetado.
             AppLog.Warning("Não foi possível registrar o arraste interno", ex);
         }
+
+        // Depois do primeiro render, sem await: a janela já está na tela e a faixa aparece
+        // quando (e se) a resposta chegar. O serviço trata as próprias exceções.
+        _ = Atualizacao.VerificarAsync();
     }
 
     /// <summary>
@@ -606,6 +642,7 @@
         Store.Changed -= OnStoreChanged;
         Store.PathsLoaded -= OnPathsLoaded;
         GroupService.Changed -= OnGroupsChanged;
+        Atualizacao.Changed -= OnAtualizacaoEncontrada;
 
         Consulta.CancelarConsultaAtual();
         foreach (var campo in new[]
@@ -645,6 +682,38 @@
     private void DismissNotification()
     {
         _showDefaultAppNotification = false;
+    }
+
+    /// <summary>
+    /// Procura versão nova em segundo plano, depois que a janela já apareceu. Nunca no
+    /// caminho de abertura: é uma chamada de rede, e o aplicativo tem que abrir na mesma
+    /// velocidade com ou sem internet.
+    /// </summary>
+    private void OnAtualizacaoEncontrada() => DespacharNaUi(() =>
+    {
+        _atualizacao = Atualizacao.Disponivel;
+        StateHasChanged();
+    });
+
+    private void AplicarAtualizacao() => Atualizacao.AplicarEReiniciar();
+
+    private void AbrirPaginaDaAtualizacao()
+    {
+        if (_atualizacao is null) return;
+        if (!Explorador.AbrirUrl(_atualizacao.Url))
+        {
+            Notifications.Warning(
+                "Não foi possível abrir a página da versão nova",
+                ServicoAtualizacao.UrlDosReleases);
+        }
+    }
+
+    private void DispensarAvisoAtualizacao()
+    {
+        // Só até a próxima abertura: a verificação roda a cada início, então a faixa
+        // reaparece se a versão continuar disponível — sem virar insistência dentro da
+        // mesma sessão.
+        _avisoAtualizacaoDispensado = true;
     }
 
     private void Carregar()
