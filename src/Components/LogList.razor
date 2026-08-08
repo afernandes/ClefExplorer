@@ -20,7 +20,7 @@
         @* Height="@null" e não Height="null": o segundo passaria a STRING "null". *@
         <OmniVirtualize TItem="ClefEvent" Items="_itens" Height="@null" ItemSize="76">
             <ItemContent Context="ev">
-                <div class="clef-list-item @(ReferenceEquals(SelectedEvent, ev) ? "is-selected" : "")"
+                <div class="clef-list-item @ItemClass(ev)"
                      role="option"
                      tabindex="0"
                      aria-selected="@ReferenceEquals(SelectedEvent, ev).ToString().ToLowerInvariant()"
@@ -57,6 +57,7 @@
     [Parameter] public bool IsBusy { get; set; }
     [Parameter] public IEnumerable<ClefEvent> Eventos { get; set; } = Enumerable.Empty<ClefEvent>();
     [Parameter] public ClefEvent? SelectedEvent { get; set; }
+    [Parameter] public IReadOnlySet<ClefEvent> CorrelatedEvents { get; set; } = new HashSet<ClefEvent>();
     [Parameter] public EventCallback<ClefEvent> OnSelect { get; set; }
 
     /// <summary>
@@ -81,11 +82,20 @@
     /// Nome anunciado pelo leitor de tela. Sem ele, o item seria lido como um amontoado de
     /// textos soltos — e o nível, que visualmente é um badge colorido, se perderia.
     /// </summary>
-    private static string RotuloAcessivel(ClefEvent e)
+    private string RotuloAcessivel(ClefEvent e)
     {
         var hora = e.Timestamp?.ToString("HH:mm:ss") ?? "";
         var excecao = string.IsNullOrEmpty(e.Exception) ? "" : ", com exceção";
-        return $"{e.Level} às {hora}: {e.Message}{excecao}";
+        var correlacionado = CorrelatedEvents.Contains(e) ? ", evento correlacionado" : "";
+        return $"{e.Level} às {hora}: {e.Message}{excecao}{correlacionado}";
+    }
+
+    private string ItemClass(ClefEvent evento)
+    {
+        var classes = new List<string>(2);
+        if (CorrelatedEvents.Contains(evento)) classes.Add("is-correlated");
+        if (ReferenceEquals(SelectedEvent, evento)) classes.Add("is-selected");
+        return string.Join(' ', classes);
     }
 
     private string ObterResumoProps(ClefEvent e)

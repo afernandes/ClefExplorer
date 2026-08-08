@@ -23,6 +23,60 @@
         </div>
     </div>
 
+    <details class="clef-dialog-section clef-dialog-disclosure">
+        <summary>
+            <span>
+                <strong>Correlação de eventos</strong>
+                <small>Aliases equivalentes a CorrelationId</small>
+            </span>
+            <OmniIcon Name="chevron-down" Size="ComponentSize.Sm" />
+        </summary>
+        <div class="clef-dialog-disclosure-content">
+            <p class="clef-dialog-hint">
+                TraceId, SpanId e RequestId são reconhecidos sempre. Os campos abaixo são
+                tratados como o mesmo CorrelationId, mesmo quando aplicações diferentes usam
+                nomes distintos.
+            </p>
+            <ObservabilityAliasEditor Title="Campos de correlação"
+                                      Hint="Ex.: X-Correlation-Id, CorrelationId"
+                                      Values="SettingsService.Settings.Correlacao.Campos"
+                                      OnChanged="SaveCorrelation" />
+        </div>
+    </details>
+
+    <details class="clef-dialog-section clef-dialog-disclosure">
+        <summary>
+            <span>
+                <strong>Integração OpenTelemetry / Seq</strong>
+                <small>Aliases para campos personalizados</small>
+            </span>
+            <OmniIcon Name="chevron-down" Size="ComponentSize.Sm" />
+        </summary>
+        <div class="clef-dialog-disclosure-content">
+            <p class="clef-dialog-hint">
+                Os campos padrão Seq/CLEF e os campos OTLP presentes nos eventos são
+                reconhecidos automaticamente. Configure aliases somente quando sua aplicação
+                usar outros nomes de propriedades.
+            </p>
+            <ObservabilityAliasEditor Title="Nome da operação"
+                                      Hint="Ex.: OperationName, SpanName"
+                                      Values="SettingsService.Settings.Observabilidade.CamposNomeOperacao"
+                                      OnChanged="SaveObservability" />
+            <ObservabilityAliasEditor Title="Nome do serviço"
+                                      Hint="Ex.: service.name, Application"
+                                      Values="SettingsService.Settings.Observabilidade.CamposNomeServico"
+                                      OnChanged="SaveObservability" />
+            <ObservabilityAliasEditor Title="Tipo do span"
+                                      Hint="Ex.: ActivityKind, SpanKind"
+                                      Values="SettingsService.Settings.Observabilidade.CamposTipoSpan"
+                                      OnChanged="SaveObservability" />
+            <ObservabilityAliasEditor Title="Duração informada"
+                                      Hint="Ex.: Duration, Elapsed; o valor precisa conter unidade"
+                                      Values="SettingsService.Settings.Observabilidade.CamposDuracao"
+                                      OnChanged="SaveObservability" />
+        </div>
+    </details>
+
     <div class="clef-dialog-section">
         <h6>Ignorar Linhas de Log (Contém Texto)</h6>
         <p class="clef-dialog-hint">Ex: HealthCheck</p>
@@ -117,6 +171,10 @@
         SettingsService.Settings.IgnoredLogLines.Remove(line);
         SettingsService.Save();
     }
+
+    private void SaveObservability() => SettingsService.Save();
+
+    private void SaveCorrelation() => SettingsService.Save();
 
     private void SetAsDefaultApp()
     {

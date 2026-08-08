@@ -1,0 +1,202 @@
+@using ClefExplorer.Models
+@using ClefExplorer.Helpers
+
+<div class="clef-detail clef-correlation-view">
+    <div class="clef-detail-head">
+        <div>
+            <h2 class="clef-correlation-title">Eventos correlacionados</h2>
+            <div class="clef-correlation-subtitle">@ResumoSequencia()</div>
+        </div>
+        <div class="clef-correlation-actions">
+            <OmniPopover Open="_criteriaOpen"
+                         OpenChanged="@(open => _criteriaOpen = open)"
+                         Position="PopoverPosition.Bottom"
+                         AlignEnd="true"
+                         Width="340px"
+                         Class="clef-correlation-info-popover">
+                <Trigger>
+                    <OmniButton Icon="info"
+                                IconOnly="true"
+                                Variant="ButtonVariant.Ghost"
+                                Size="ComponentSize.Sm"
+                                title="Critérios da correlação"
+                                aria-label="Exibir critérios da correlação"
+                                aria-haspopup="dialog"
+                                aria-expanded="@_criteriaOpen.ToString().ToLowerInvariant()" />
+                </Trigger>
+                <ChildContent>
+                    <section class="clef-correlation-popover" aria-label="Critérios da correlação">
+                        <div class="clef-correlation-popover-head">
+                            <OmniIcon Name="link" Size="ComponentSize.Sm" />
+                            <h3>Como os eventos foram relacionados</h3>
+                        </div>
+                        <p>A sequência usa correspondência direta com o evento de origem: mesmo campo e valor.</p>
+                        <div class="clef-correlation-chips">
+                            @foreach (var identificador in Resultado.Identificadores)
+                            {
+                                <span class="clef-correlation-chip" title="@identificador.Valor">
+                                    <strong>@identificador.Campo</strong>
+                                    <span>@identificador.Valor</span>
+                                </span>
+                            }
+                        </div>
+                        <p class="clef-correlation-popover-note">
+                            As linhas azuis na lista/tabela fazem parte desta sequência. Uma linha sem destaque entre elas pode indicar trabalho concorrente.
+                        </p>
+                    </section>
+                </ChildContent>
+            </OmniPopover>
+            <OmniButton Text="Fechar"
+                        Icon="x"
+                        Variant="ButtonVariant.Ghost"
+                        Size="ComponentSize.Sm"
+                        OnClick="@(() => OnClose.InvokeAsync())" />
+        </div>
+    </div>
+
+    @if (Resultado.QuantidadeRelacionada == 0)
+    {
+        <div class="clef-correlation-empty">
+            <OmniEmptyState Icon="search" Title="Nenhum outro evento com a mesma correlação" />
+        </div>
+    }
+    else
+    {
+        <OmniTabs Class="clef-correlation-tabs">
+            <OmniTabItem Title="Sequência" Icon="list">
+                <div class="clef-correlation-list" role="listbox" aria-label="Sequência de eventos correlacionados">
+                    <OmniVirtualize TItem="EventoCorrelacionado" Items="_eventos" Height="@null" ItemSize="62">
+                        <ItemContent Context="item">
+                            @{
+                                var atual = ReferenceEquals(SelectedEvent, item.Evento);
+                                var origem = ReferenceEquals(Resultado.Origem, item.Evento);
+                            }
+                            <button type="button"
+                                    class="clef-correlation-event @(atual ? "is-current" : "")"
+                                    role="option"
+                                    disabled="@atual"
+                                    aria-selected="@atual.ToString().ToLowerInvariant()"
+                                    aria-current="@(atual ? "true" : null)"
+                                    aria-label="@RotuloAcessivel(item)"
+                                    title="@RotuloAcessivel(item)"
+                                    @onclick="@(() => OnSelect.InvokeAsync(item.Evento))">
+                                <span class="clef-correlation-rail" aria-hidden="true"></span>
+                                <span class="clef-correlation-event-body">
+                                    <span class="clef-correlation-event-head">
+                                        <span class="clef-correlation-time">@FormatarInstante(item.Evento.Timestamp)</span>
+                                        <OmniBadge Text="@item.Evento.Level" Variant="LogLevelStyles.Variant(item.Evento.Level)" />
+                                        @if (_mostrarFonte && !string.IsNullOrWhiteSpace(item.Evento.SourceFile))
+                                        {
+                                            <span class="clef-correlation-source" title="@item.Evento.SourceFile">
+                                                <OmniIcon Name="file-text" Size="ComponentSize.Sm" />
+                                                <span>@System.IO.Path.GetFileName(item.Evento.SourceFile)</span>
+                                            </span>
+                                        }
+                                        @if (origem || atual)
+                                        {
+                                            <span class="clef-correlation-flags">
+                                                @if (origem)
+                                                {
+                                                    <span class="clef-correlation-origin">Origem</span>
+                                                }
+                                                @if (atual)
+                                                {
+                                                    <span class="clef-correlation-current">Selecionado</span>
+                                                }
+                                            </span>
+                                        }
+                                    </span>
+                                    <span class="clef-correlation-message" title="@item.Evento.Message">@Mensagem(item.Evento)</span>
+                                </span>
+                            </button>
+                        </ItemContent>
+                    </OmniVirtualize>
+                </div>
+            </OmniTabItem>
+            <OmniTabItem Title="Tempos" Icon="clock">
+                <LogCorrelationTiming Analise="@AnaliseTemporal"
+                                      SelectedEvent="@SelectedEvent"
+                                      OnSelect="@OnSelect" />
+            </OmniTabItem>
+        </OmniTabs>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public ResultadoNavegacaoCorrelacao Resultado { get; set; } = null!;
+
+    [Parameter, EditorRequired]
+    public ResultadoAnaliseTemporalCorrelacao AnaliseTemporal { get; set; } = null!;
+
+    [Parameter]
+    public ClefEvent? SelectedEvent { get; set; }
+
+    [Parameter]
+    public EventCallback<ClefEvent> OnSelect { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private ICollection<EventoCorrelacionado> _eventos = Array.Empty<EventoCorrelacionado>();
+    private bool _criteriaOpen;
+    private bool _mostrarData;
+    private bool _mostrarFonte;
+    private int _quantidadeFontes;
+
+    protected override void OnParametersSet()
+    {
+        _eventos = Resultado.Eventos as ICollection<EventoCorrelacionado>
+            ?? Resultado.Eventos.ToArray();
+
+        _mostrarData = Resultado.Eventos
+            .Select(item => item.Evento.Timestamp?.Date)
+            .Where(data => data is not null)
+            .Distinct()
+            .Take(2)
+            .Count() > 1;
+
+        _quantidadeFontes = Resultado.Eventos
+            .Select(item => item.Evento.SourceFile)
+            .Where(caminho => !string.IsNullOrWhiteSpace(caminho))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+        _mostrarFonte = _quantidadeFontes > 1;
+    }
+
+    private static string TextoQuantidade(int quantidade) => quantidade == 1
+        ? "1 evento na sequência"
+        : $"{quantidade:N0} eventos na sequência";
+
+    private string ResumoSequencia()
+    {
+        var partes = new List<string>(3) { TextoQuantidade(Resultado.Eventos.Count) };
+        if (AnaliseTemporal.IntervaloTotal > TimeSpan.Zero)
+        {
+            partes.Add($"{FormatacaoTempo.Intervalo(AnaliseTemporal.IntervaloTotal)} de intervalo");
+        }
+
+        if (_mostrarFonte)
+        {
+            partes.Add($"{_quantidadeFontes:N0} fontes");
+        }
+
+        return string.Join(" · ", partes);
+    }
+
+    private string FormatarInstante(DateTimeOffset? instante) => instante is null
+        ? "—"
+        : instante.Value.ToString(_mostrarData ? "dd/MM HH:mm:ss.fff" : "HH:mm:ss.fff");
+
+    private static string Mensagem(ClefEvent evento) =>
+        evento.Message ?? evento.MessageTemplate ?? "(evento sem mensagem)";
+
+    private static string CamposCorrespondentes(EventoCorrelacionado item) =>
+        string.Join(", ", item.Correspondencias.Select(c => c.Campo).Distinct(StringComparer.OrdinalIgnoreCase));
+
+    private static string RotuloAcessivel(EventoCorrelacionado item)
+    {
+        var instante = item.Evento.Timestamp?.ToString("dd/MM/yyyy HH:mm:ss.fff") ?? "sem data";
+        return $"{item.Evento.Level}, {instante}: {Mensagem(item.Evento)}. Relacionado por {CamposCorrespondentes(item)}";
+    }
+}

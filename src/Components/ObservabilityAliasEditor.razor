@@ -1,0 +1,77 @@
+<div class="clef-observability-alias-group">
+    <div class="clef-observability-alias-heading">
+        <label>@Title</label>
+        <span>@Hint</span>
+    </div>
+    <div class="clef-observability-aliases">
+        @foreach (var alias in Values)
+        {
+            var currentAlias = alias;
+            <span class="clef-observability-alias" @key="currentAlias">
+                <code>@currentAlias</code>
+                <button type="button"
+                        aria-label="Remover alias @currentAlias"
+                        title="Remover alias"
+                        @onclick="@(() => RemoveAsync(currentAlias))">
+                    <OmniIcon Name="x" Size="ComponentSize.Sm" />
+                </button>
+            </span>
+        }
+    </div>
+    <div class="clef-input-row clef-observability-alias-input">
+        <OmniTextBox Value="@_newAlias"
+                     ValueChanged="@(value => _newAlias = value ?? string.Empty)"
+                     Placeholder="Novo alias..."
+                     OnKeyDown="OnKeyDown" />
+        <OmniButton Text="Adicionar"
+                    Variant="ButtonVariant.Ghost"
+                    Size="ComponentSize.Sm"
+                    Disabled="@string.IsNullOrWhiteSpace(_newAlias)"
+                    OnClick="AddAsync" />
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public string Hint { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public List<string> Values { get; set; } = null!;
+
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    private string _newAlias = string.Empty;
+
+    private async Task OnKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter") await AddAsync();
+    }
+
+    private async Task AddAsync()
+    {
+        var alias = _newAlias.Trim();
+        if (alias.Length == 0) return;
+
+        if (!Values.Contains(alias, StringComparer.OrdinalIgnoreCase))
+        {
+            Values.Add(alias);
+            await OnChanged.InvokeAsync();
+        }
+
+        _newAlias = string.Empty;
+    }
+
+    private async Task RemoveAsync(string alias)
+    {
+        var existing = Values.FirstOrDefault(value =>
+            value.Equals(alias, StringComparison.OrdinalIgnoreCase));
+        if (existing is null) return;
+
+        Values.Remove(existing);
+        await OnChanged.InvokeAsync();
+    }
+}

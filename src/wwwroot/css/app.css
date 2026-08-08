@@ -335,9 +335,25 @@ span.omni-tree-text.clef-tree-backup { font-weight: 600; }
     background: var(--omni-bg-sunken);
 }
 
+.clef-list-item.is-correlated {
+    background: color-mix(in oklab, var(--omni-info) 10%, var(--omni-bg));
+    border-left-color: color-mix(in oklab, var(--omni-info) 78%, var(--omni-fg));
+}
+
+.clef-list-item.is-correlated:hover {
+    background: color-mix(in oklab, var(--omni-info) 15%, var(--omni-bg));
+}
+
 .clef-list-item.is-selected {
     background: var(--omni-accent-soft);
     border-left-color: var(--omni-accent);
+}
+
+/* A seleção continua roxa; a barra azul preserva a informação independente de
+   que a mesma linha também pertence à sequência correlacionada. */
+.clef-list-item.is-correlated.is-selected {
+    background: var(--omni-accent-soft);
+    border-left-color: color-mix(in oklab, var(--omni-info) 78%, var(--omni-fg));
 }
 
 .clef-list-item-body {
@@ -432,6 +448,14 @@ span.omni-tree-text.clef-tree-backup { font-weight: 600; }
     display: inline-flex;
     align-items: center;
     gap: 5px;
+}
+
+.clef-detail-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    flex-shrink: 0;
 }
 
 .clef-detail-card {
@@ -531,6 +555,605 @@ span.omni-tree-text.clef-tree-backup { font-weight: 600; }
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+}
+
+/* ---- Navegação por correlação -------------------------------------------- */
+.clef-correlation-view {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.clef-correlation-title {
+    margin: 0;
+    color: var(--omni-fg);
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.clef-correlation-subtitle {
+    margin-top: 2px;
+    color: var(--omni-fg-muted);
+    font-size: 12.5px;
+}
+
+.clef-correlation-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.clef-correlation-popover {
+    width: 100%;
+    padding: 13px;
+    color: var(--omni-fg);
+}
+
+.clef-correlation-popover-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    color: var(--omni-fg);
+}
+
+.clef-correlation-popover-head h3 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.clef-correlation-popover p {
+    margin: 0 0 10px;
+    color: var(--omni-fg-muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.clef-correlation-popover .clef-correlation-popover-note {
+    padding-top: 9px;
+    margin: 10px 0 0;
+    border-top: 1px solid var(--omni-line);
+}
+
+.clef-correlation-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.clef-correlation-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+    padding: 4px 7px;
+    border: 1px solid var(--omni-line);
+    border-radius: var(--omni-radius-sm);
+    background: var(--omni-bg-sunken);
+    color: var(--omni-fg);
+    font-family: var(--omni-font-mono);
+    font-size: 11.5px;
+}
+
+.clef-correlation-chip strong {
+    color: var(--omni-fg-muted);
+    font-family: var(--omni-font);
+    font-size: 11px;
+}
+
+.clef-correlation-chip span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.clef-correlation-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    border-top: 1px solid var(--omni-line);
+}
+
+.clef-correlation-tabs {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.clef-correlation-tabs > .omni-tabs-bar {
+    flex-shrink: 0;
+    padding-inline: 8px;
+}
+
+.clef-correlation-tabs > .omni-tabs-bar .omni-tab {
+    padding: 7px 10px;
+    font-size: 12.5px;
+}
+
+.clef-correlation-tabs > .omni-tabs-body {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    padding: 0;
+    overflow: hidden;
+}
+
+.clef-correlation-event {
+    position: relative;
+    display: flex;
+    width: 100%;
+    min-height: 60px;
+    padding: 7px 10px 7px 22px;
+    border: 0;
+    border-bottom: 1px solid var(--omni-line);
+    background: transparent;
+    color: var(--omni-fg);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.clef-correlation-event:hover:not(:disabled) {
+    background: var(--omni-bg-hover);
+}
+
+.clef-correlation-event:focus-visible {
+    outline: 2px solid var(--omni-accent);
+    outline-offset: -2px;
+}
+
+.clef-correlation-event.is-current {
+    background: color-mix(in oklab, var(--omni-accent) 10%, transparent);
+    cursor: default;
+    opacity: 1;
+}
+
+.clef-correlation-rail {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 9px;
+    width: 1px;
+    background: var(--omni-line-strong);
+}
+
+.clef-correlation-rail::before {
+    position: absolute;
+    top: 15px;
+    left: -4px;
+    width: 9px;
+    height: 9px;
+    border: 2px solid var(--omni-bg-sunken);
+    border-radius: 50%;
+    background: var(--omni-fg-muted);
+    content: "";
+}
+
+.clef-correlation-event.is-current .clef-correlation-rail::before {
+    background: var(--omni-accent);
+}
+
+.clef-correlation-event-body {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.clef-correlation-event-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+}
+
+.clef-correlation-time {
+    flex-shrink: 0;
+    color: var(--omni-fg-muted);
+    font-family: var(--omni-font-mono);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+.clef-correlation-source {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: 4px;
+    overflow: hidden;
+    color: var(--omni-fg-muted);
+    font-size: 11px;
+}
+
+.clef-correlation-source > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.clef-correlation-flags {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.clef-correlation-origin {
+    color: var(--omni-fg-muted);
+}
+
+.clef-correlation-current {
+    color: var(--omni-accent);
+}
+
+.clef-correlation-message {
+    display: block;
+    overflow: hidden;
+    color: var(--omni-fg);
+    font-family: var(--omni-font-mono);
+    font-size: 12.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.clef-correlation-empty {
+    flex: 1;
+    min-height: 160px;
+}
+
+/* ---- Tempos da correlação ------------------------------------------------ */
+.clef-correlation-timing {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.clef-correlation-timing-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px 14px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--omni-line);
+    background: var(--omni-bg-sunken);
+    color: var(--omni-fg-muted);
+    font-size: 11px;
+    line-height: 1.35;
+    flex-wrap: wrap;
+}
+
+.clef-correlation-timing-total {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.clef-correlation-timing-total strong {
+    color: var(--omni-fg);
+    font-family: var(--omni-font-mono);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.clef-correlation-timing-legend {
+    display: flex;
+    align-items: center;
+    gap: 7px 12px;
+    flex-wrap: wrap;
+}
+
+.clef-correlation-timing-legend > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.clef-correlation-timing-legend i {
+    display: inline-block;
+    width: 14px;
+    height: 5px;
+    border-radius: 999px;
+}
+
+.clef-correlation-timing-legend i.is-real {
+    background: var(--omni-accent);
+}
+
+.clef-correlation-timing-legend i.is-reported {
+    border: 1px solid color-mix(in oklab, var(--omni-warn) 72%, var(--omni-fg));
+    background: color-mix(in oklab, var(--omni-warn) 24%, transparent);
+}
+
+.clef-correlation-timing-legend i.is-estimated {
+    border: 1px dashed color-mix(in oklab, var(--omni-info) 72%, var(--omni-fg));
+    background: color-mix(in oklab, var(--omni-info) 18%, transparent);
+}
+
+.clef-correlation-timing-legend i.is-point {
+    width: 5px;
+    background: var(--omni-fg-muted);
+}
+
+.clef-correlation-timing-caveat {
+    flex-basis: 100%;
+}
+
+.clef-correlation-timing-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
+.clef-correlation-timing-grid {
+    min-width: 680px;
+}
+
+.clef-correlation-timing-scale,
+.clef-correlation-timing-row {
+    display: grid;
+    grid-template-columns: minmax(250px, 40%) minmax(360px, 1fr);
+}
+
+.clef-correlation-timing-scale {
+    position: sticky;
+    z-index: 2;
+    top: 0;
+    min-height: 30px;
+    align-items: end;
+    border-bottom: 1px solid var(--omni-line-strong);
+    background: var(--omni-bg-elev);
+    color: var(--omni-fg-muted);
+    font-size: 10.5px;
+}
+
+.clef-correlation-timing-scale > span:first-child {
+    padding: 0 10px 6px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.clef-correlation-timing-scale-track {
+    position: relative;
+    height: 100%;
+    margin-inline: 12px 18px;
+}
+
+.clef-correlation-timing-scale-track > span {
+    position: absolute;
+    bottom: 6px;
+    font-family: var(--omni-font-mono);
+    font-variant-numeric: tabular-nums;
+    transform: translateX(-50%);
+    white-space: nowrap;
+}
+
+.clef-correlation-timing-scale-track > span:first-child {
+    transform: none;
+}
+
+.clef-correlation-timing-row {
+    width: 100%;
+    min-height: 54px;
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid var(--omni-line);
+    background: transparent;
+    color: var(--omni-fg);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.clef-correlation-timing-row:hover {
+    background: var(--omni-bg-hover);
+}
+
+.clef-correlation-timing-row:focus-visible {
+    z-index: 1;
+    outline: 2px solid var(--omni-accent);
+    outline-offset: -2px;
+}
+
+.clef-correlation-timing-row.is-current {
+    background: color-mix(in oklab, var(--omni-accent) 10%, transparent);
+    cursor: default;
+    opacity: 1;
+}
+
+.clef-correlation-timing-event {
+    display: flex;
+    min-width: 0;
+    align-self: stretch;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px 6px calc(7px + var(--clef-tree-depth, 0) * 16px);
+    border-right: 1px solid var(--omni-line);
+}
+
+.clef-correlation-tree-toggle,
+.clef-correlation-tree-spacer,
+.clef-correlation-tree-kind {
+    display: inline-flex;
+    width: 20px;
+    height: 24px;
+    flex: 0 0 20px;
+    align-items: center;
+    justify-content: center;
+}
+
+.clef-correlation-tree-toggle {
+    padding: 0;
+    border: 0;
+    border-radius: var(--omni-radius-sm);
+    background: transparent;
+    color: var(--omni-fg-muted);
+}
+
+.clef-correlation-tree-toggle:hover {
+    background: var(--omni-bg-sunken);
+    color: var(--omni-fg);
+}
+
+.clef-correlation-tree-kind {
+    color: var(--omni-fg-muted);
+}
+
+.clef-correlation-timing-row.is-span .clef-correlation-tree-kind {
+    color: color-mix(in oklab, var(--omni-accent) 62%, var(--omni-fg));
+}
+
+.clef-correlation-timing-event-content {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.clef-correlation-timing-event-head {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 6px;
+}
+
+.clef-correlation-timing-duration {
+    margin-left: auto;
+    border-radius: 999px;
+    padding: 1px 5px;
+    font-family: var(--omni-font-mono);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.clef-correlation-timing-duration.is-real {
+    background: color-mix(in oklab, var(--omni-accent) 12%, transparent);
+    color: color-mix(in oklab, var(--omni-accent) 65%, var(--omni-fg));
+}
+
+.clef-correlation-timing-duration.is-reported {
+    background: color-mix(in oklab, var(--omni-warn) 12%, transparent);
+    color: color-mix(in oklab, var(--omni-warn) 66%, var(--omni-fg));
+}
+
+.clef-correlation-timing-duration.is-estimated {
+    background: color-mix(in oklab, var(--omni-info) 10%, transparent);
+    color: color-mix(in oklab, var(--omni-info) 65%, var(--omni-fg));
+}
+
+.clef-correlation-timing-duration.is-point {
+    color: var(--omni-fg-muted);
+}
+
+.clef-correlation-observability-tag,
+.clef-correlation-service {
+    overflow: hidden;
+    border-radius: 999px;
+    padding: 1px 5px;
+    color: var(--omni-fg-muted);
+    font-size: 10px;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.clef-correlation-observability-tag {
+    border: 1px solid var(--omni-line);
+    text-transform: uppercase;
+}
+
+.clef-correlation-service {
+    max-width: 110px;
+    background: var(--omni-bg-sunken);
+}
+
+.clef-correlation-timing-row.is-span .clef-correlation-message {
+    font-weight: 650;
+}
+
+.clef-correlation-timing-track {
+    position: relative;
+    min-width: 0;
+    align-self: stretch;
+    margin-inline: 12px 18px;
+    background-image: linear-gradient(to right, var(--omni-line) 1px, transparent 1px);
+    background-position: left top;
+    background-size: 25% 100%;
+}
+
+.clef-correlation-timing-track::after {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    left: 0;
+    height: 1px;
+    background: var(--omni-line-strong);
+    content: "";
+}
+
+.clef-correlation-timing-bar {
+    position: absolute;
+    z-index: 1;
+    top: 50%;
+    left: var(--clef-time-start);
+    width: max(3px, var(--clef-time-width));
+    height: 12px;
+    border-radius: 3px;
+    transform: translateY(-50%);
+}
+
+.clef-correlation-timing-bar.is-real {
+    background: var(--omni-accent);
+}
+
+.clef-correlation-timing-bar.is-reported {
+    border: 1px solid color-mix(in oklab, var(--omni-warn) 76%, var(--omni-fg));
+    background: color-mix(in oklab, var(--omni-warn) 28%, transparent);
+}
+
+.clef-correlation-timing-bar.is-estimated {
+    border: 1px dashed color-mix(in oklab, var(--omni-info) 76%, var(--omni-fg));
+    background: repeating-linear-gradient(
+        135deg,
+        color-mix(in oklab, var(--omni-info) 28%, transparent) 0 4px,
+        color-mix(in oklab, var(--omni-info) 8%, transparent) 4px 8px);
+}
+
+.clef-correlation-timing-marker {
+    position: absolute;
+    z-index: 2;
+    top: 50%;
+    left: var(--clef-time-start);
+    width: 3px;
+    height: 18px;
+    border-radius: 999px;
+    background: var(--omni-fg-muted);
+    transform: translate(-50%, -50%);
+}
+
+.clef-correlation-timing-marker.is-real {
+    background: color-mix(in oklab, var(--omni-accent) 72%, var(--omni-fg));
+}
+
+.clef-correlation-timing-marker.is-reported {
+    background: color-mix(in oklab, var(--omni-warn) 72%, var(--omni-fg));
+}
+
+.clef-correlation-timing-marker.is-estimated {
+    background: color-mix(in oklab, var(--omni-info) 72%, var(--omni-fg));
 }
 
 /* ---- Stack trace destacado (StackTraceHighlighter) ------------------------ */
@@ -715,7 +1338,122 @@ span.omni-tree-text.clef-tree-backup { font-weight: 600; }
 }
 
 /* Linha do evento selecionado: mesma leitura da lista. */
+.clef-grid .omni-grid tbody tr.is-correlated {
+    background: color-mix(in oklab, var(--omni-info) 10%, var(--omni-bg));
+}
+.clef-dialog-disclosure {
+    border: 1px solid var(--omni-line);
+    border-radius: var(--omni-radius-md);
+    background: color-mix(in oklab, var(--omni-bg-elev) 82%, transparent);
+}
+.clef-dialog-disclosure > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    cursor: pointer;
+    list-style: none;
+}
+.clef-dialog-disclosure > summary::-webkit-details-marker { display: none; }
+.clef-dialog-disclosure > summary span {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.clef-dialog-disclosure > summary strong {
+    font-size: 13.5px;
+    color: var(--omni-fg);
+}
+.clef-dialog-disclosure > summary small {
+    font-size: 11.5px;
+    font-weight: 400;
+    color: var(--omni-fg-muted);
+}
+.clef-dialog-disclosure > summary .omni-icon { transition: transform 120ms ease; }
+.clef-dialog-disclosure[open] > summary .omni-icon { transform: rotate(180deg); }
+.clef-dialog-disclosure-content {
+    padding: 0 12px 12px;
+    border-top: 1px solid var(--omni-line);
+}
+.clef-dialog-disclosure-content > .clef-dialog-hint { margin-top: 10px; }
+.clef-observability-alias-group + .clef-observability-alias-group {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid color-mix(in oklab, var(--omni-line) 70%, transparent);
+}
+.clef-observability-alias-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+}
+.clef-observability-alias-heading label {
+    font-size: 12.5px;
+    font-weight: 650;
+    color: var(--omni-fg);
+}
+.clef-observability-alias-heading span {
+    font-size: 11px;
+    color: var(--omni-fg-muted);
+    text-align: right;
+}
+.clef-observability-aliases {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+.clef-observability-alias {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+    padding: 2px 3px 2px 7px;
+    border: 1px solid var(--omni-line);
+    border-radius: 999px;
+    background: var(--omni-bg);
+    color: var(--omni-fg);
+}
+.clef-observability-alias code { font-size: 11.5px; }
+.clef-observability-alias button {
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--omni-fg-muted);
+    cursor: pointer;
+}
+.clef-observability-alias button:hover {
+    background: color-mix(in oklab, var(--omni-danger) 12%, transparent);
+    color: color-mix(in oklab, var(--omni-danger) 78%, var(--omni-fg));
+}
+.clef-observability-alias-input {
+    margin: 7px 0 0;
+}
+.clef-observability-origin {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--omni-primary) 9%, transparent);
+    color: var(--omni-fg-muted);
+    font-size: 10.5px;
+}
+
+.clef-grid .omni-grid tbody tr.is-correlated td:first-child {
+    box-shadow: inset 3px 0 0 0 color-mix(in oklab, var(--omni-info) 78%, var(--omni-fg));
+}
+
 .clef-grid .omni-grid tbody tr.is-selected {
+    background: color-mix(in oklab, var(--omni-accent) 14%, var(--omni-bg));
+}
+
+.clef-grid .omni-grid tbody tr.is-correlated.is-selected {
     background: color-mix(in oklab, var(--omni-accent) 14%, var(--omni-bg));
 }
 

@@ -1,0 +1,282 @@
+@using System.Globalization
+@using ClefExplorer.Helpers
+@using ClefExplorer.Models
+
+<div class="clef-correlation-timing">
+    @if (Analise.Itens.Count == 0 || Analise.Inicio is null || Analise.Fim is null)
+    {
+        <div class="clef-correlation-empty">
+            <OmniEmptyState Icon="clock" Title="Os eventos não possuem data para montar a linha do tempo" />
+        </div>
+    }
+    else
+    {
+        <div class="clef-correlation-timing-summary" role="note">
+            <div class="clef-correlation-timing-total">
+                <strong>@FormatacaoTempo.Intervalo(Analise.IntervaloTotal)</strong>
+                <span>na janela observada</span>
+            </div>
+            <div class="clef-correlation-timing-legend" aria-label="Legenda da linha do tempo">
+                @if (Analise.TemDuracoesReais)
+                {
+                    <span><i class="is-real" aria-hidden="true"></i>Duração real do span</span>
+                }
+                @if (Analise.TemDuracoesInformadas)
+                {
+                    <span><i class="is-reported" aria-hidden="true"></i>Duração informada</span>
+                }
+                @if (Analise.TemIntervalosEstimados)
+                {
+                    <span><i class="is-estimated" aria-hidden="true"></i>Intervalo até o próximo log (≈)</span>
+                }
+                <span><i class="is-point" aria-hidden="true"></i>Evento pontual</span>
+            </div>
+            @if (Analise.TemIntervalosEstimados)
+            {
+                <span class="clef-correlation-timing-caveat">
+                    Intervalos entre logs são indicativos; não representam tempo de execução.
+                </span>
+            }
+        </div>
+
+        <div class="clef-correlation-timing-scroll">
+            <div class="clef-correlation-timing-grid" role="tree" aria-label="Hierarquia e tempos dos eventos correlacionados">
+                <div class="clef-correlation-timing-scale" aria-hidden="true">
+                    <span>Span / evento</span>
+                    <span class="clef-correlation-timing-scale-track">
+                        <span style="left: 0">0</span>
+                        <span style="left: 50%">@FormatacaoTempo.Intervalo(TimeSpan.FromTicks(Analise.IntervaloTotal.Ticks / 2))</span>
+                        <span style="left: 100%">@FormatacaoTempo.Intervalo(Analise.IntervaloTotal)</span>
+                    </span>
+                </div>
+
+                @foreach (var noVisivel in _nosVisiveis)
+                {
+                    var no = noVisivel.No;
+                    var item = no.Item;
+                    var selecionado = ReferenceEquals(SelectedEvent, item.Evento);
+                    var temFilhos = no.Filhos.Count > 0;
+                    var recolhido = EstaRecolhido(no);
+                    <div class="clef-correlation-timing-row @(selecionado ? "is-current" : "") @(no.EhSpan ? "is-span" : "is-log")"
+                         role="treeitem"
+                         tabindex="0"
+                         aria-level="@(noVisivel.Nivel + 1)"
+                         aria-expanded="@(temFilhos ? (!recolhido).ToString().ToLowerInvariant() : null)"
+                         aria-selected="@selecionado.ToString().ToLowerInvariant()"
+                         aria-current="@(selecionado ? "true" : null)"
+                         aria-label="@RotuloAcessivel(item)"
+                         title="@RotuloAcessivel(item)"
+                         @onclick="@(() => Selecionar(item.Evento))"
+                         @onkeydown="@(args => AoPressionar(args, no))">
+                        <span class="clef-correlation-timing-event" style="@EstiloProfundidade(noVisivel.Nivel)">
+                            @if (temFilhos && no.EhSpan && !string.IsNullOrWhiteSpace(no.SpanId))
+                            {
+                                <button type="button"
+                                        class="clef-correlation-tree-toggle"
+                                        aria-label="@(recolhido ? "Expandir span" : "Recolher span")"
+                                        title="@(recolhido ? "Expandir span" : "Recolher span")"
+                                        @onclick="@(() => Alternar(no))"
+                                        @onclick:stopPropagation="true">
+                                    <OmniIcon Name="@(recolhido ? "chevron-right" : "chevron-down")" Size="ComponentSize.Sm" />
+                                </button>
+                            }
+                            else
+                            {
+                                <span class="clef-correlation-tree-spacer" aria-hidden="true"></span>
+                            }
+                            <span class="clef-correlation-tree-kind" aria-hidden="true">
+                                <OmniIcon Name="@(no.EhSpan ? "activity" : "file-text")" Size="ComponentSize.Sm" />
+                            </span>
+                            <span class="clef-correlation-timing-event-content">
+                                <span class="clef-correlation-timing-event-head">
+                                    <span class="clef-correlation-time">@FormatarInstante(item.Evento.Timestamp)</span>
+                                    <OmniBadge Text="@item.Evento.Level" Variant="LogLevelStyles.Variant(item.Evento.Level)" />
+                                    @if (no.EhSpan && !string.IsNullOrWhiteSpace(item.Metadados.TipoSpan))
+                                    {
+                                        <span class="clef-correlation-observability-tag">@item.Metadados.TipoSpan</span>
+                                    }
+                                    @if (no.EhSpan && !string.IsNullOrWhiteSpace(item.Metadados.NomeServico))
+                                    {
+                                        <span class="clef-correlation-service" title="Serviço: @item.Metadados.NomeServico">
+                                            @item.Metadados.NomeServico
+                                        </span>
+                                    }
+                                    <span class="clef-correlation-timing-duration @ClasseTipo(item.Tipo)"
+                                          title="@DescricaoDuracao(item)">
+                                        @Prefixo(item.Tipo)@FormatacaoTempo.Intervalo(item.Intervalo)
+                                    </span>
+                                </span>
+                                <span class="clef-correlation-message">@NomeExibido(item)</span>
+                            </span>
+                        </span>
+                        <span class="clef-correlation-timing-track" aria-hidden="true">
+                            @if (item.Tipo == TipoMedicaoTemporalCorrelacao.InstanteDoEvento || item.Intervalo == TimeSpan.Zero)
+                            {
+                                <span class="clef-correlation-timing-marker @ClasseTipo(item.Tipo)" style="@Estilo(item)"></span>
+                            }
+                            else
+                            {
+                                <span class="clef-correlation-timing-bar @ClasseTipo(item.Tipo)" style="@Estilo(item)"></span>
+                                <span class="clef-correlation-timing-marker @ClasseTipo(item.Tipo)" style="@Estilo(item)"></span>
+                            }
+                        </span>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public ResultadoAnaliseTemporalCorrelacao Analise { get; set; } = null!;
+
+    [Parameter]
+    public ClefEvent? SelectedEvent { get; set; }
+
+    [Parameter]
+    public EventCallback<ClefEvent> OnSelect { get; set; }
+
+    private readonly HashSet<string> _spansRecolhidos = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<NoVisivel> _nosVisiveis = new();
+    private ResultadoAnaliseTemporalCorrelacao? _analiseAnterior;
+    private bool _mostrarData;
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(_analiseAnterior, Analise))
+        {
+            _analiseAnterior = Analise;
+            _spansRecolhidos.Clear();
+        }
+
+        _mostrarData = Analise.Itens
+            .Select(item => item.Evento.Timestamp?.Date)
+            .Where(data => data is not null)
+            .Distinct()
+            .Take(2)
+            .Count() > 1;
+
+        AtualizarNosVisiveis();
+    }
+
+    private void AtualizarNosVisiveis()
+    {
+        _nosVisiveis.Clear();
+        foreach (var raiz in Analise.Hierarquia)
+        {
+            AdicionarVisiveis(raiz, 0);
+        }
+    }
+
+    private void AdicionarVisiveis(NoHierarquiaSpan no, int nivel)
+    {
+        _nosVisiveis.Add(new NoVisivel(no, nivel));
+        if (EstaRecolhido(no)) return;
+
+        foreach (var filho in no.Filhos)
+        {
+            AdicionarVisiveis(filho, nivel + 1);
+        }
+    }
+
+    private bool EstaRecolhido(NoHierarquiaSpan no) =>
+        no.SpanId is { } spanId && _spansRecolhidos.Contains(spanId);
+
+    private void Alternar(NoHierarquiaSpan no)
+    {
+        if (no.SpanId is not { } spanId) return;
+        if (!_spansRecolhidos.Add(spanId)) _spansRecolhidos.Remove(spanId);
+        AtualizarNosVisiveis();
+    }
+
+    private Task Selecionar(ClefEvent evento) => ReferenceEquals(SelectedEvent, evento)
+        ? Task.CompletedTask
+        : OnSelect.InvokeAsync(evento);
+
+    private async Task AoPressionar(KeyboardEventArgs args, NoHierarquiaSpan no)
+    {
+        if (args.Key is "Enter" or " ")
+        {
+            await Selecionar(no.Item.Evento);
+        }
+        else if (args.Key == "ArrowLeft" && !EstaRecolhido(no) && no.Filhos.Count > 0)
+        {
+            Alternar(no);
+        }
+        else if (args.Key == "ArrowRight" && EstaRecolhido(no))
+        {
+            Alternar(no);
+        }
+    }
+
+    private string Estilo(ItemAnaliseTemporalCorrelacao item)
+    {
+        var totalTicks = Math.Max(1, Analise.IntervaloTotal.Ticks);
+        var inicioTicks = Math.Max(0, (item.Inicio - Analise.Inicio!.Value).Ticks);
+        var inicio = Math.Clamp(inicioTicks * 100d / totalTicks, 0, 100);
+        var largura = Math.Clamp(item.Intervalo.Ticks * 100d / totalTicks, 0, 100 - inicio);
+
+        return $"--clef-time-start:{inicio.ToString("0.####", CultureInfo.InvariantCulture)}%;"
+            + $"--clef-time-width:{largura.ToString("0.####", CultureInfo.InvariantCulture)}%";
+    }
+
+    private static string EstiloProfundidade(int nivel) =>
+        $"--clef-tree-depth:{Math.Min(nivel, 12)}";
+
+    private string FormatarInstante(DateTimeOffset? instante) => instante is null
+        ? "—"
+        : instante.Value.ToString(_mostrarData ? "dd/MM HH:mm:ss.fff" : "HH:mm:ss.fff");
+
+    private static string ClasseTipo(TipoMedicaoTemporalCorrelacao tipo) => tipo switch
+    {
+        TipoMedicaoTemporalCorrelacao.DuracaoRealDoSpan => "is-real",
+        TipoMedicaoTemporalCorrelacao.DuracaoInformadaPeloProdutor => "is-reported",
+        TipoMedicaoTemporalCorrelacao.IntervaloAteProximoEvento => "is-estimated",
+        _ => "is-point",
+    };
+
+    private static string Prefixo(TipoMedicaoTemporalCorrelacao tipo) =>
+        tipo == TipoMedicaoTemporalCorrelacao.IntervaloAteProximoEvento ? "≈ " : string.Empty;
+
+    private static string Mensagem(ClefEvent evento) =>
+        evento.Message ?? evento.MessageTemplate ?? "(evento sem mensagem)";
+
+    private static string NomeExibido(ItemAnaliseTemporalCorrelacao item) =>
+        item.Metadados.EhSpan ? item.Metadados.NomeOperacao : Mensagem(item.Evento);
+
+    private static string DescricaoDuracao(ItemAnaliseTemporalCorrelacao item) =>
+        item.Metadados.OrigemDuracao switch
+        {
+            OrigemDuracaoObservabilidade.SeqClef => "Duração real calculada por @st → @t (Seq/CLEF)",
+            OrigemDuracaoObservabilidade.OpenTelemetryOtlp =>
+                "Duração real calculada por startTimeUnixNano → endTimeUnixNano (OpenTelemetry)",
+            OrigemDuracaoObservabilidade.CampoConfigurado =>
+                $"Duração informada por {item.Metadados.CampoDuracao}",
+            _ when item.Tipo == TipoMedicaoTemporalCorrelacao.IntervaloAteProximoEvento =>
+                "Intervalo indicativo até o próximo log; não representa tempo de execução",
+            _ => "Evento pontual",
+        };
+
+    private static string RotuloAcessivel(ItemAnaliseTemporalCorrelacao item)
+    {
+        var instante = item.Evento.Timestamp?.ToString("dd/MM/yyyy HH:mm:ss.fff") ?? "sem data";
+        var medida = item.Tipo switch
+        {
+            TipoMedicaoTemporalCorrelacao.DuracaoRealDoSpan =>
+                $"duração real do span de {FormatacaoTempo.Intervalo(item.Intervalo)}",
+            TipoMedicaoTemporalCorrelacao.DuracaoInformadaPeloProdutor =>
+                $"duração informada de {FormatacaoTempo.Intervalo(item.Intervalo)}",
+            TipoMedicaoTemporalCorrelacao.IntervaloAteProximoEvento =>
+                $"intervalo indicativo de {FormatacaoTempo.Intervalo(item.Intervalo)} até o próximo log",
+            _ => "evento pontual",
+        };
+
+        var servico = string.IsNullOrWhiteSpace(item.Metadados.NomeServico)
+            ? string.Empty
+            : $", serviço {item.Metadados.NomeServico}";
+        return $"{item.Evento.Level}, {instante}: {NomeExibido(item)}{servico}; {medida}";
+    }
+
+    private sealed record NoVisivel(NoHierarquiaSpan No, int Nivel);
+}

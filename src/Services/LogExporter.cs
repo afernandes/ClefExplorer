@@ -303,6 +303,50 @@ namespace ClefExplorer.Services
                 WriteJsonProperty(writer, "@x", new ScalarValue(evento.Exception), ref primeiro);
             }
 
+            // Trace/span são campos reservados do CLEF, não propriedades comuns. Gravá-los
+            // explicitamente mantém a navegação por correlação depois de exportar e reabrir.
+            if (!string.IsNullOrWhiteSpace(evento.TraceId))
+            {
+                WriteJsonProperty(writer, "@tr", new ScalarValue(evento.TraceId), ref primeiro);
+            }
+
+            if (!string.IsNullOrWhiteSpace(evento.SpanId))
+            {
+                WriteJsonProperty(writer, "@sp", new ScalarValue(evento.SpanId), ref primeiro);
+            }
+
+            if (!string.IsNullOrWhiteSpace(evento.ParentSpanId))
+            {
+                WriteJsonProperty(writer, "@ps", new ScalarValue(evento.ParentSpanId), ref primeiro);
+            }
+
+            if (evento.SpanStart is { } inicioDoSpan)
+            {
+                WriteJsonProperty(
+                    writer,
+                    "@st",
+                    new ScalarValue(inicioDoSpan.ToString("O", CultureInfo.InvariantCulture)),
+                    ref primeiro);
+            }
+
+            if (evento.ObservabilidadeClef is { } observabilidade)
+            {
+                if (!string.IsNullOrWhiteSpace(observabilidade.TipoSpan))
+                {
+                    WriteJsonProperty(writer, "@sk", new ScalarValue(observabilidade.TipoSpan), ref primeiro);
+                }
+
+                if (observabilidade.EscopoInstrumentacao is { } escopo)
+                {
+                    WriteJsonProperty(writer, "@sc", escopo, ref primeiro);
+                }
+
+                if (observabilidade.AtributosRecurso is { } recurso)
+                {
+                    WriteJsonProperty(writer, "@ra", recurso, ref primeiro);
+                }
+            }
+
             if (evento.Properties is not null)
             {
                 foreach (var propriedade in evento.Properties)

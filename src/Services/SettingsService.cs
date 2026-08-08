@@ -28,6 +28,7 @@ namespace ClefExplorer.Services
         {
             try
             {
+                _settings.Normalizar();
                 var json = JsonSerializer.Serialize(_settings, new JsonSerializerOptions { WriteIndented = true });
                 _storage.WriteText(FileName, json);
                 LastError = null;
@@ -48,6 +49,7 @@ namespace ClefExplorer.Services
                 if (json is null) return;
 
                 _settings = JsonSerializer.Deserialize<Settings>(json) ?? new Settings();
+                _settings.Normalizar();
                 LastError = null;
             }
             catch (Exception ex)

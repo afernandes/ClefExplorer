@@ -53,6 +53,9 @@ namespace ClefExplorer
             services.AddSingleton<FiltroArquivosLogIgnorados>();
             services.AddSingleton<LogStore>();
             services.AddSingleton<ConsultaLogs>();
+            services.AddSingleton<NavegacaoCorrelacao>();
+            services.AddSingleton<LeituraMetadadosObservabilidade>();
+            services.AddSingleton<AnaliseTemporalCorrelacao>();
             services.AddSingleton<LogGroupService>();
             services.AddSingleton<SettingsService>();
             services.AddSingleton<IFilePickerService, WinFormsFilePickerService>();
