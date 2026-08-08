@@ -106,6 +106,66 @@ public class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public void Aliases_de_observabilidade_sobrevivem_e_sao_normalizados()
+    {
+        var service = new SettingsService(NewStorage());
+        service.Settings.Observabilidade.CamposNomeOperacao =
+            [" MinhaOperacao ", "minhaoperacao", ""];
+        service.Settings.Observabilidade.CamposNomeServico.Add("AplicacaoLegada");
+        service.Save();
+
+        var reaberto = new SettingsService(NewStorage());
+
+        Assert.Equal(
+            new[] { "MinhaOperacao" },
+            reaberto.Settings.Observabilidade.CamposNomeOperacao);
+        Assert.Contains("AplicacaoLegada", reaberto.Settings.Observabilidade.CamposNomeServico);
+    }
+
+    [Fact]
+    public void Campos_de_correlacao_sobrevivem_e_sao_normalizados()
+    {
+        var service = new SettingsService(NewStorage());
+        service.Settings.Correlacao.Campos =
+            [" X-Correlation-Id ", "CorrelationId", "correlationid", "IdDaOperacao", ""];
+        service.Save();
+
+        var reaberto = new SettingsService(NewStorage());
+
+        Assert.Equal(
+            new[] { "X-Correlation-Id", "CorrelationId", "IdDaOperacao" },
+            reaberto.Settings.Correlacao.Campos);
+    }
+
+    [Fact]
+    public void Configuracao_antiga_recebe_aliases_padrao_de_observabilidade()
+    {
+        File.WriteAllText(
+            Path.Combine(_dataFolder, "settings.json"),
+            """{"IgnoredFilePatterns":[],"IgnoredLogLines":[]}""");
+
+        var service = new SettingsService(NewStorage());
+
+        Assert.Contains("OperationName", service.Settings.Observabilidade.CamposNomeOperacao);
+        Assert.Contains("service.name", service.Settings.Observabilidade.CamposNomeServico);
+        Assert.Contains("Duration", service.Settings.Observabilidade.CamposDuracao);
+    }
+
+    [Fact]
+    public void Configuracao_antiga_recebe_campos_padrao_de_correlacao()
+    {
+        File.WriteAllText(
+            Path.Combine(_dataFolder, "settings.json"),
+            """{"IgnoredFilePatterns":[],"IgnoredLogLines":[]}""");
+
+        var service = new SettingsService(NewStorage());
+
+        Assert.Equal(
+            new[] { "X-Correlation-Id", "CorrelationId" },
+            service.Settings.Correlacao.Campos);
+    }
+
+    [Fact]
     public void Save_notifies_listeners()
     {
         var service = new SettingsService(NewStorage());

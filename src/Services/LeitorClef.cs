@@ -307,6 +307,13 @@ namespace ClefExplorer.Services
             string? mensagemPronta = null;
             string? nivel = null;
             string? excecao = null;
+            string? traceId = null;
+            string? spanId = null;
+            string? parentSpanId = null;
+            DateTimeOffset? spanStart = null;
+            string? spanKind = null;
+            LogEventPropertyValue? instrumentationScope = null;
+            LogEventPropertyValue? resourceAttributes = null;
             object? eventId = null;
             var temEventId = false;
             List<LogEventProperty>? propriedades = null;
@@ -318,7 +325,7 @@ namespace ClefExplorer.Services
                 {
                     if (reader.ValueTextEquals("@t"u8))
                     {
-                        timestamp = LerTimestamp(ref reader);
+                        timestamp = LerTimestamp(ref reader, "@t", obrigatorio: true);
                     }
                     else if (reader.ValueTextEquals("@mt"u8))
                     {
@@ -346,15 +353,38 @@ namespace ClefExplorer.Services
                     }
                     else if (reader.ValueTextEquals("@tr"u8))
                     {
-                        // O ClefEvent não guarda trace/span, mas a validação precisa continuar
-                        // valendo: um @tr corrompido derruba a linha no leitor oficial.
-                        var tr = LerTexto(ref reader, "@tr");
-                        if (tr != null) ActivityTraceId.CreateFromString(tr.AsSpan());
+                        traceId = LerTexto(ref reader, "@tr");
+                        // Além de guardar o texto original, preservamos a validação do
+                        // leitor oficial: um identificador corrompido invalida a linha.
+                        if (traceId != null) ActivityTraceId.CreateFromString(traceId.AsSpan());
+                    }
+                    else if (reader.ValueTextEquals("@sp"u8))
+                    {
+                        spanId = LerTexto(ref reader, "@sp");
+                        if (spanId != null) ActivitySpanId.CreateFromString(spanId.AsSpan());
+                    }
+                    else if (reader.ValueTextEquals("@ps"u8))
+                    {
+                        parentSpanId = LerTexto(ref reader, "@ps");
+                        if (parentSpanId != null) ActivitySpanId.CreateFromString(parentSpanId.AsSpan());
+                    }
+                    else if (reader.ValueTextEquals("@st"u8))
+                    {
+                        spanStart = LerTimestamp(ref reader, "@st", obrigatorio: false);
+                    }
+                    else if (reader.ValueTextEquals("@sk"u8))
+                    {
+                        spanKind = LerTexto(ref reader, "@sk");
+                    }
+                    else if (reader.ValueTextEquals("@sc"u8))
+                    {
+                        reader.Read();
+                        instrumentationScope = LerValor(ref reader, rascunho, cache);
                     }
                     else
                     {
-                        var sp = LerTexto(ref reader, "@sp");
-                        if (sp != null) ActivitySpanId.CreateFromString(sp.AsSpan());
+                        reader.Read();
+                        resourceAttributes = LerValor(ref reader, rascunho, cache);
                     }
 
                     continue;
@@ -402,6 +432,20 @@ namespace ClefExplorer.Services
                     : template.Template.Render(new PropriedadesOrdinais(propriedades), CultureInfo.InvariantCulture),
                 Exception = excecao,
                 SourceFile = arquivo,
+                TraceId = traceId,
+                SpanId = spanId,
+                ParentSpanId = parentSpanId,
+                SpanStart = spanStart,
+                ObservabilidadeClef = spanKind is null
+                    && instrumentationScope is null
+                    && resourceAttributes is null
+                        ? null
+                        : new MetadadosClefObservabilidade
+                        {
+                            TipoSpan = spanKind,
+                            EscopoInstrumentacao = instrumentationScope,
+                            AtributosRecurso = resourceAttributes,
+                        },
                 // A forma compacta em vez de Dictionary: 18 pares imutáveis não precisam
                 // de buckets, e multiplicado por centenas de milhares de eventos o
                 // dicionário era uma das maiores fatias da memória retida.
@@ -414,7 +458,7 @@ namespace ClefExplorer.Services
         }
 
         /// <summary>
-        /// Só vale a pena comparar com os nove nomes reservados quando o nome começa com '@'.
+        /// Só vale a pena comparar com os quatorze nomes reservados quando o nome começa com '@'.
         /// Nome escapado ("@t") entra na comparação porque o ValueTextEquals desescapa.
         /// </summary>
         private static bool EhReservado(ref Utf8JsonReader reader)
@@ -433,7 +477,12 @@ namespace ClefExplorer.Services
                 || reader.ValueTextEquals("@r"u8)
                 || reader.ValueTextEquals("@i"u8)
                 || reader.ValueTextEquals("@tr"u8)
-                || reader.ValueTextEquals("@sp"u8);
+                || reader.ValueTextEquals("@sp"u8)
+                || reader.ValueTextEquals("@ps"u8)
+                || reader.ValueTextEquals("@st"u8)
+                || reader.ValueTextEquals("@sk"u8)
+                || reader.ValueTextEquals("@sc"u8)
+                || reader.ValueTextEquals("@ra"u8);
         }
 
         private static void Acrescentar(
@@ -758,17 +807,21 @@ namespace ClefExplorer.Services
         private static int TamanhoEmBytes(ref Utf8JsonReader reader) =>
             reader.HasValueSequence ? (int)reader.ValueSequence.Length : reader.ValueSpan.Length;
 
-        private static DateTimeOffset LerTimestamp(ref Utf8JsonReader reader)
+        private static DateTimeOffset? LerTimestamp(
+            ref Utf8JsonReader reader,
+            string campo,
+            bool obrigatorio)
         {
             reader.Read();
             if (reader.TokenType != JsonTokenType.String)
             {
                 if (reader.TokenType == JsonTokenType.Null)
                 {
-                    throw new InvalidDataException("A linha não inclui o campo obrigatório `@t`.");
+                    if (!obrigatorio) return null;
+                    throw new InvalidDataException($"A linha não inclui o campo obrigatório `{campo}`.");
                 }
 
-                throw new InvalidDataException("O valor de `@t` não está num formato suportado.");
+                throw new InvalidDataException($"O valor de `{campo}` não está num formato suportado.");
             }
 
             if (!reader.ValueIsEscaped && !reader.HasValueSequence && TentarTimestampCanonico(reader.ValueSpan, out var canonico))
@@ -780,7 +833,7 @@ namespace ClefExplorer.Services
             // provider). Trocar por InvariantCulture aqui mudaria quais textos são aceitos.
             if (!DateTimeOffset.TryParse(reader.GetString(), out var valor))
             {
-                throw new InvalidDataException("O valor de `@t` não está num formato de data suportado.");
+                throw new InvalidDataException($"O valor de `{campo}` não está num formato de data suportado.");
             }
 
             return valor;

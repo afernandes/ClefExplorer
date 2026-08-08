@@ -2,6 +2,9 @@
 @using ClefExplorer.Helpers
 @using Serilog.Events
 @inject IJSRuntime JSRuntime
+@inject LeituraMetadadosObservabilidade LeituraObservabilidade
+@inject SettingsService SettingsService
+@inject NavegacaoCorrelacao Navegacao
 
 <div class="clef-detail">
     @if (SelectedEvent != null)
@@ -12,7 +15,18 @@
                 <span class="clef-detail-meta-item"><OmniIcon Name="calendar" Size="ComponentSize.Sm" /> @SelectedEvent.Timestamp?.ToString("dd/MM/yyyy")</span>
                 <span class="clef-detail-meta-item"><OmniIcon Name="clock" Size="ComponentSize.Sm" /> @SelectedEvent.Timestamp?.ToString("HH:mm:ss.fff zzz")</span>
             </div>
-            <OmniButton Icon="x" IconOnly="true" Variant="ButtonVariant.Ghost" Size="ComponentSize.Sm" OnClick="@(() => OnClose.InvokeAsync())" />
+            <div class="clef-detail-actions">
+                @if (CanNavigateCorrelation)
+                {
+                    <OmniButton Text="@(IsLocatingCorrelation ? "Localizando…" : "Correlação")"
+                                Icon="link"
+                                Disabled="@IsLocatingCorrelation"
+                                Variant="ButtonVariant.Ghost"
+                                Size="ComponentSize.Sm"
+                                OnClick="@(() => OnNavigateCorrelation.InvokeAsync())" />
+                }
+                <OmniButton Icon="x" IconOnly="true" Variant="ButtonVariant.Ghost" Size="ComponentSize.Sm" OnClick="@(() => OnClose.InvokeAsync())" />
+            </div>
         </div>
 
         <OmniCard Title="Mensagem" Class="clef-detail-card">
@@ -45,6 +59,73 @@
                     </tr>
                 </thead>
                 <tbody>
+                    @if (!string.IsNullOrWhiteSpace(_observability?.TraceId))
+                    {
+                        <tr>
+                            <td class="clef-prop-key">TraceId</td>
+                            <td class="clef-mono">@_observability.TraceId</td>
+                        </tr>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_observability?.SpanId))
+                    {
+                        <tr>
+                            <td class="clef-prop-key">SpanId</td>
+                            <td class="clef-mono">@_observability.SpanId</td>
+                        </tr>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_observability?.ParentSpanId))
+                    {
+                        <tr>
+                            <td class="clef-prop-key">ParentSpanId</td>
+                            <td class="clef-mono">@_observability.ParentSpanId</td>
+                        </tr>
+                    }
+                    @if (_observability?.EhSpan == true)
+                    {
+                        <tr>
+                            <td class="clef-prop-key">Operação</td>
+                            <td>@_observability.NomeOperacao</td>
+                        </tr>
+                        @if (!string.IsNullOrWhiteSpace(_observability.NomeServico))
+                        {
+                            <tr>
+                                <td class="clef-prop-key">Serviço</td>
+                                <td>@_observability.NomeServico</td>
+                            </tr>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(_observability.TipoSpan))
+                        {
+                            <tr>
+                                <td class="clef-prop-key">Tipo do span</td>
+                                <td>@_observability.TipoSpan</td>
+                            </tr>
+                        }
+                        <tr>
+                            <td class="clef-prop-key">Início do span</td>
+                            <td class="clef-mono">@_observability.Inicio!.Value.ToString("dd/MM/yyyy HH:mm:ss.fffffff zzz")</td>
+                        </tr>
+                        <tr>
+                            <td class="clef-prop-key">Duração do span</td>
+                            <td>
+                                <span class="clef-mono">@FormatacaoTempo.Intervalo(_observability.Duracao!.Value)</span>
+                                <span class="clef-observability-origin">@DurationOrigin(_observability)</span>
+                            </td>
+                        </tr>
+                    }
+                    @if (SelectedEvent.ObservabilidadeClef?.EscopoInstrumentacao is { } scope)
+                    {
+                        <tr>
+                            <td class="clef-prop-key">Escopo de instrumentação (@@sc)</td>
+                            <td><LogPropertyViewer Model="@scope" OnFilter="OnFilter" /></td>
+                        </tr>
+                    }
+                    @if (SelectedEvent.ObservabilidadeClef?.AtributosRecurso is { } resourceAttributes)
+                    {
+                        <tr>
+                            <td class="clef-prop-key">Atributos do recurso (@@ra)</td>
+                            <td><LogPropertyViewer Model="@resourceAttributes" OnFilter="OnFilter" /></td>
+                        </tr>
+                    }
                     @if (SelectedEvent.Properties != null)
                     {
                         @foreach (var p in SelectedEvent.Properties.OrderBy(x => x.Key))
@@ -58,7 +139,7 @@
                                             <pre class="clef-pre">@StackTraceHighlighter.Highlight(s)</pre>
                                         </div>
                                     }
-                                    else if (p.Key.Equals("X-Correlation-Id", StringComparison.OrdinalIgnoreCase) && p.Value is ScalarValue svCorr && svCorr.Value is string sCorr)
+                                    else if (Navegacao.EhCampoCorrelacao(p.Key) && p.Value is ScalarValue svCorr && svCorr.Value is string sCorr)
                                     {
                                         var ids = sCorr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                                         <div class="clef-chips">
@@ -98,6 +179,30 @@
     [Parameter] public ClefEvent? SelectedEvent { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback<string> OnFilter { get; set; }
+    [Parameter] public bool CanNavigateCorrelation { get; set; }
+    [Parameter] public bool IsLocatingCorrelation { get; set; }
+    [Parameter] public EventCallback OnNavigateCorrelation { get; set; }
+
+    private MetadadosObservabilidadeEvento? _observability;
+
+    protected override void OnParametersSet()
+    {
+        _observability = SelectedEvent is null
+            ? null
+            : LeituraObservabilidade.Extrair(
+                SelectedEvent,
+                SettingsService.Settings.Observabilidade);
+    }
+
+    private static string DurationOrigin(MetadadosObservabilidadeEvento observability) =>
+        observability.OrigemDuracao switch
+        {
+            OrigemDuracaoObservabilidade.SeqClef => "Seq/CLEF",
+            OrigemDuracaoObservabilidade.OpenTelemetryOtlp => "OpenTelemetry",
+            OrigemDuracaoObservabilidade.CampoConfigurado =>
+                $"campo {observability.CampoDuracao}",
+            _ => string.Empty,
+        };
 
     private async Task CopyException()
     {

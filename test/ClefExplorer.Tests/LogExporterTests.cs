@@ -176,6 +176,45 @@ public class LogExporterTests
     }
 
     [Fact]
+    public void Clef_exporta_metadados_de_trace_e_span_como_campos_reservados()
+    {
+        var evento = Event();
+        evento.TraceId = "0af7651916cd43dd8448eb211c80319c";
+        evento.SpanId = "b7ad6b7169203331";
+        evento.ParentSpanId = "00f067aa0ba902b7";
+        evento.SpanStart = new DateTimeOffset(2026, 6, 15, 12, 30, 44, 850, TimeSpan.Zero);
+
+        using var json = JsonDocument.Parse(LogExporter.ToClef(new[] { evento }).Trim());
+
+        Assert.Equal(evento.TraceId, json.RootElement.GetProperty("@tr").GetString());
+        Assert.Equal(evento.SpanId, json.RootElement.GetProperty("@sp").GetString());
+        Assert.Equal(evento.ParentSpanId, json.RootElement.GetProperty("@ps").GetString());
+        Assert.Equal(evento.SpanStart, json.RootElement.GetProperty("@st").GetDateTimeOffset());
+    }
+
+    [Fact]
+    public void Clef_exporta_extensoes_de_observabilidade_Seq_como_campos_reservados()
+    {
+        var evento = Event();
+        evento.ObservabilidadeClef = new MetadadosClefObservabilidade
+        {
+            TipoSpan = "Client",
+            EscopoInstrumentacao = new StructureValue(
+                new[] { new LogEventProperty("name", new ScalarValue("HttpClient")) }),
+            AtributosRecurso = new StructureValue(
+                new[] { new LogEventProperty("service.name", new ScalarValue("checkout-api")) }),
+        };
+
+        using var json = JsonDocument.Parse(LogExporter.ToClef(new[] { evento }).Trim());
+
+        Assert.Equal("Client", json.RootElement.GetProperty("@sk").GetString());
+        Assert.Equal("HttpClient", json.RootElement.GetProperty("@sc").GetProperty("name").GetString());
+        Assert.Equal(
+            "checkout-api",
+            json.RootElement.GetProperty("@ra").GetProperty("service.name").GetString());
+    }
+
+    [Fact]
     public void Clef_keeps_accented_text_readable()
     {
         var clef = LogExporter.ToClef(new[] { Event(message: "Operação não concluída") });
@@ -299,6 +338,40 @@ public class LogExporterTests
             if (File.Exists(origem)) File.Delete(origem);
             if (File.Exists(destino)) File.Delete(destino);
         }
+    }
+
+    [Fact]
+    public async Task Clef_preserva_trace_e_span_na_ida_e_volta()
+    {
+        const string linha = """
+            {"@t":"2026-06-15T12:30:45.0000000Z","@mt":"operação","@tr":"0af7651916cd43dd8448eb211c80319c","@sp":"b7ad6b7169203331"}
+            """;
+
+        var (original, reaberto, _) = await IdaEVolta(linha);
+
+        Assert.Equal(original.TraceId, reaberto.TraceId);
+        Assert.Equal(original.SpanId, reaberto.SpanId);
+    }
+
+    [Fact]
+    public async Task Clef_preserva_extensoes_Seq_na_ida_e_volta()
+    {
+        const string linha = """
+            {"@t":"2026-06-15T12:30:45.0000000Z","@mt":"GET /pedidos","@sk":"Server","@sc":{"name":"AspNetCore","version":"1.12.0"},"@ra":{"service.name":"pedidos-api"}}
+            """;
+
+        var (original, reaberto, exportada) = await IdaEVolta(linha);
+
+        Assert.Equal(original.ObservabilidadeClef!.TipoSpan, reaberto.ObservabilidadeClef!.TipoSpan);
+        Assert.Equal(
+            original.ObservabilidadeClef.EscopoInstrumentacao!.ToString(),
+            reaberto.ObservabilidadeClef.EscopoInstrumentacao!.ToString());
+        Assert.Equal(
+            original.ObservabilidadeClef.AtributosRecurso!.ToString(),
+            reaberto.ObservabilidadeClef.AtributosRecurso!.ToString());
+        Assert.Contains("\"@sk\"", exportada);
+        Assert.Contains("\"@sc\"", exportada);
+        Assert.Contains("\"@ra\"", exportada);
     }
 
     [Fact]

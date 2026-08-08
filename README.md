@@ -49,10 +49,13 @@ avisa quando há versão nova publicada aqui, com um link para o release.
 - **Stack Trace Highlighter:** Exceções são formatadas e coloridas para facilitar a leitura.
 - **Propriedades Estruturadas:** Visualize todas as propriedades do evento de log em uma tabela organizada.
 - **Correlation ID:** Clique em IDs de correlação para filtrar todos os logs relacionados a uma mesma requisição.
+- **Navegação por Correlação:** A partir de um evento, monte a sequência dos eventos que compartilham TraceId, SpanId, RequestId ou CorrelationId — sem mexer nos filtros da consulta atual.
+- **Linha do Tempo de Spans:** Durações, intervalos entre eventos e hierarquia pai/filho a partir dos campos de tracing do CLEF (`@tr`, `@sp`, `@ps`, `@st`) e de atributos OpenTelemetry/Seq.
 
 ### ⚙️ Configurações
 - **Ignorar Arquivos:** Defina padrões (wildcards) para ignorar arquivos indesejados (ex: *backup*).
 - **Ignorar Linhas:** Configure textos para ocultar linhas de log que são ruído (ex: health checks).
+- **Aliases de Correlação e Observabilidade:** Informe os nomes que sua aplicação usa para correlação, nome da operação, serviço, tipo do span e duração — os campos padrão continuam reconhecidos sem configuração.
 
 ## 📋 Pré-requisitos
 

@@ -225,6 +225,7 @@
 
     [Parameter] public IReadOnlyList<ClefEvent> Eventos { get; set; } = Array.Empty<ClefEvent>();
     [Parameter] public ClefEvent? SelectedEvent { get; set; }
+    [Parameter] public IReadOnlySet<ClefEvent> CorrelatedEvents { get; set; } = new HashSet<ClefEvent>();
     [Parameter] public EventCallback<ClefEvent> OnSelect { get; set; }
 
     /// <summary>Colunas descobertas no conteúdo dos logs carregados.</summary>
@@ -275,11 +276,12 @@
     private static string TemplateOuMensagem(ClefEvent e) =>
         !string.IsNullOrEmpty(e.MessageTemplate) ? e.MessageTemplate : e.Message ?? string.Empty;
 
-    /// <summary>Destaca a linha selecionada e as de erro, como na lista.</summary>
+    /// <summary>Destaca linhas correlacionadas, a selecionada e as de erro, como na lista.</summary>
     private string LinhaCss(ClefEvent e)
     {
-        var classes = new List<string>(2);
+        var classes = new List<string>(3);
 
+        if (CorrelatedEvents.Contains(e)) classes.Add("is-correlated");
         if (ReferenceEquals(e, SelectedEvent)) classes.Add("is-selected");
 
         if (string.Equals(e.Level, "Error", StringComparison.OrdinalIgnoreCase)

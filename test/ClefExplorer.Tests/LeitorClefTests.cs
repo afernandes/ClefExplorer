@@ -278,7 +278,7 @@ public class LeitorClefTests
     public void An_unknown_level_invalidates_the_line(string trecho) =>
         Invalida("{" + Instante + "," + trecho + "}");
 
-    // --- BLOCO D: @x, @tr, @sp, @i ----------------------------------------------
+    // --- BLOCO D: @x, @tr, @sp, @ps, @st, @i ------------------------------------
 
     [Fact]
     public void The_exception_keeps_the_raw_text_with_its_line_breaks()
@@ -296,15 +296,55 @@ public class LeitorClefTests
     [InlineData(@"""@tr"":{""a"":1}")]
     [InlineData(@"""@sp"":true")]
     [InlineData(@"""@sp"":""b7ad""")]
+    [InlineData(@"""@ps"":""b7ad""")]
+    [InlineData(@"""@st"":true")]
+    [InlineData(@"""@st"":""data inválida""")]
+    [InlineData(@"""@sk"":{""kind"":""Server""}")]
+    [InlineData(@"""@sk"":42")]
     public void A_malformed_reserved_field_invalidates_the_line(string trecho) =>
         Invalida("{" + Instante + @",""@mt"":""x""," + trecho + "}");
 
     [Fact]
-    public void Valid_trace_and_span_ids_do_not_become_properties()
+    public void Identificadores_validos_de_trace_e_span_sao_preservados_fora_das_propriedades()
     {
-        // O ClefEvent não guarda trace/span; o que não pode acontecer é eles virarem coluna.
         var evento = Ler(@"{" + Instante + @",""@mt"":""x"",""@tr"":""0af7651916cd43dd8448eb211c80319c"",""@sp"":""b7ad6b7169203331""}");
 
+        Assert.Equal("0af7651916cd43dd8448eb211c80319c", evento.TraceId);
+        Assert.Equal("b7ad6b7169203331", evento.SpanId);
+        Assert.Empty(evento.Properties!);
+    }
+
+    [Fact]
+    public void Metadados_de_span_sao_preservados_fora_das_propriedades()
+    {
+        var evento = Ler(@"{" + Instante
+            + @",""@mt"":""x"",""@ps"":""00f067aa0ba902b7"",""@st"":""2026-07-31T22:44:15.9504192-03:00""}");
+
+        Assert.Equal("00f067aa0ba902b7", evento.ParentSpanId);
+        Assert.Equal(
+            new DateTimeOffset(2026, 7, 31, 22, 44, 15, TimeSpan.FromHours(-3)).AddTicks(9504192),
+            evento.SpanStart);
+        Assert.Empty(evento.Properties!);
+    }
+
+    [Fact]
+    public void Extensoes_de_observabilidade_Seq_sao_preservadas_fora_das_propriedades()
+    {
+        var evento = Ler(@"{" + Instante
+            + @",""@mt"":""GET /pedidos"",""@sk"":""Server"",""@sc"":{""name"":""OpenTelemetry.Instrumentation.AspNetCore"",""version"":""1.12.0""},""@ra"":{""service.name"":""pedidos-api"",""service.version"":""2.4.0""}}" );
+
+        var observabilidade = Assert.IsType<MetadadosClefObservabilidade>(evento.ObservabilidadeClef);
+        Assert.Equal("Server", observabilidade.TipoSpan);
+
+        var escopo = Assert.IsType<StructureValue>(observabilidade.EscopoInstrumentacao);
+        Assert.Equal(
+            "OpenTelemetry.Instrumentation.AspNetCore",
+            Assert.IsType<ScalarValue>(escopo.Properties.Single(p => p.Name == "name").Value).Value);
+
+        var recurso = Assert.IsType<StructureValue>(observabilidade.AtributosRecurso);
+        Assert.Equal(
+            "pedidos-api",
+            Assert.IsType<ScalarValue>(recurso.Properties.Single(p => p.Name == "service.name").Value).Value);
         Assert.Empty(evento.Properties!);
     }
 

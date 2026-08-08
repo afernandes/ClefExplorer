@@ -14,6 +14,8 @@
 @inject NotificationService Notifications
 @inject UiPreferencesService UiPreferences
 @inject ConsultaLogs Consulta
+@inject NavegacaoCorrelacao Navegacao
+@inject AnaliseTemporalCorrelacao AnaliseTemporal
 @inject ServicoAtualizacao Atualizacao
 @inject ExploradorArquivos Explorador
 @inject IJSRuntime JS
@@ -123,7 +125,35 @@
                                 </OmniSplitterPane>
                                 <OmniSplitterPane Size="45%" Min="@(DetalheAbaixo ? "140px" : "320px")">
                                     <div class="clef-pane">
-                                        <LogDetails SelectedEvent="@_selected" OnClose="CloseDetail" OnFilter="FiltrarPorTexto" />
+                                        @if (_resultadoCorrelacao is not null)
+                                        {
+                                            @* À direita, empilhamos correlação sobre detalhes para não
+                                               espremer dois painéis estreitos. Com o detalhe abaixo da
+                                               lista há largura disponível, então eles ficam lado a lado. *@
+                                            <OmniSplitter @key="_resultadoCorrelacao"
+                                                          Orientation="@(DetalheAbaixo ? Orientation.Horizontal : Orientation.Vertical)"
+                                                          Variant="SplitterVariant.Line">
+                                                <OmniSplitterPane Size="@(DetalheAbaixo ? "40%" : "50%")"
+                                                                  Min="@(DetalheAbaixo ? "300px" : "220px")">
+                                                    <div class="clef-pane">
+                                                        <LogCorrelationNavigator Resultado="@_resultadoCorrelacao"
+                                                                                 AnaliseTemporal="@(_analiseTemporalCorrelacao!)"
+                                                                                 SelectedEvent="@_selected"
+                                                                                 OnSelect="SelecionarDaCorrelacao"
+                                                                                 OnClose="FecharNavegacaoCorrelacao" />
+                                                    </div>
+                                                </OmniSplitterPane>
+                                                <OmniSplitterPane Min="@(DetalheAbaixo ? "320px" : "200px")">
+                                                    <div class="clef-pane">
+                                                        @RenderDetalhes()
+                                                    </div>
+                                                </OmniSplitterPane>
+                                            </OmniSplitter>
+                                        }
+                                        else
+                                        {
+                                            @RenderDetalhes()
+                                        }
                                     </div>
                                 </OmniSplitterPane>
                             </OmniSplitter>
@@ -144,6 +174,16 @@
 @* Lista ou tabela conforme a preferência — o resto do layout (splitter, detalhe) é o
    mesmo nos dois modos, então só o miolo troca. *@
 @code {
+    private RenderFragment RenderDetalhes() => __builder =>
+    {
+        <LogDetails SelectedEvent="@_selected"
+                    OnClose="CloseDetail"
+                    OnFilter="FiltrarPorTexto"
+                    CanNavigateCorrelation="@Navegacao.PodeNavegar(_selected)"
+                    IsLocatingCorrelation="@_buscandoCorrelacao"
+                    OnNavigateCorrelation="AbrirNavegacaoCorrelacao" />
+    };
+
     private RenderFragment RenderEventos() => __builder =>
     {
         @* Carregando e ainda sem nada para mostrar: o miolo inteiro vira o indicador de
@@ -202,6 +242,7 @@
             <LogGrid IsBusy="@_isBusy"
                      Eventos="@_todosEventos"
                      SelectedEvent="@_selected"
+                     CorrelatedEvents="@_eventosCorrelacionados"
                      OnSelect="Select"
                      Colunas="@_colunasDescobertas"
                      VisibleColumns="@ColunasVisiveis"
@@ -212,6 +253,7 @@
             <LogList IsBusy="@_isBusy"
                      Eventos="@_todosEventos"
                      SelectedEvent="@_selected"
+                     CorrelatedEvents="@_eventosCorrelacionados"
                      OnSelect="Select" />
         }
     };
@@ -224,6 +266,11 @@
     private bool EstaCarregandoVazio => Store.IsLoading && _todosEventos.Count == 0;
 
     private ClefEvent? _selected;
+    private ResultadoNavegacaoCorrelacao? _resultadoCorrelacao;
+    private ResultadoAnaliseTemporalCorrelacao? _analiseTemporalCorrelacao;
+    private HashSet<ClefEvent> _eventosCorrelacionados = new();
+    private bool _buscandoCorrelacao;
+    private CancellationTokenSource? _correlationCts;
     private bool _isBusy;
     private bool _descartado;
 
@@ -649,6 +696,7 @@
         {
             Interlocked.Exchange(ref _debounceCts, null),
             Interlocked.Exchange(ref _exportCts, null),
+            Interlocked.Exchange(ref _correlationCts, null),
         })
         {
             if (campo is null) continue;
@@ -1122,6 +1170,7 @@
 
     private void Select(ClefEvent e)
     {
+        CancelarBuscaCorrelacao();
         _selected = e;
         // A lista/grade entrega o evento, não a posição: invalidar aqui faz a próxima
         // seta pagar uma varredura e as seguintes andarem pelo índice guardado.
@@ -1130,7 +1179,88 @@
 
     private void CloseDetail()
     {
+        LimparNavegacaoCorrelacao();
         _selected = null;
+    }
+
+    private async Task AbrirNavegacaoCorrelacao()
+    {
+        var origem = _selected;
+        if (origem is null || !Navegacao.PodeNavegar(origem)) return;
+
+        var cts = new CancellationTokenSource();
+        var anterior = Interlocked.Exchange(ref _correlationCts, cts);
+        if (anterior is not null)
+        {
+            try { anterior.Cancel(); } catch (ObjectDisposedException) { }
+            anterior.Dispose();
+        }
+
+        _buscandoCorrelacao = true;
+        StateHasChanged();
+
+        try
+        {
+            // O snapshot é imutável por contrato. A varredura pode sair do dispatcher sem
+            // bloquear a janela, mesmo quando há centenas de milhares de eventos.
+            var snapshot = Store.Snapshot();
+            var resultado = await Task.Run(
+                () => Navegacao.Localizar(origem, snapshot, cts.Token),
+                cts.Token);
+
+            if (!_descartado && ReferenceEquals(_selected, origem) && !cts.IsCancellationRequested)
+            {
+                _resultadoCorrelacao = resultado;
+                _analiseTemporalCorrelacao = AnaliseTemporal.Analisar(
+                    resultado,
+                    SettingsService.Settings.Observabilidade);
+                _eventosCorrelacionados = resultado.Eventos
+                    .Select(item => item.Evento)
+                    .ToHashSet();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // O usuário selecionou outro evento ou fechou o detalhe durante a busca.
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("Falha ao localizar eventos correlacionados", ex);
+            Notifications.Error("Não foi possível navegar pela correlação", ex.Message);
+        }
+        finally
+        {
+            var aindaAtual = ReferenceEquals(
+                Interlocked.CompareExchange(ref _correlationCts, null, cts),
+                cts);
+            cts.Dispose();
+            if (aindaAtual) _buscandoCorrelacao = false;
+        }
+    }
+
+    private void SelecionarDaCorrelacao(ClefEvent evento) => Select(evento);
+
+    private void FecharNavegacaoCorrelacao()
+        => LimparNavegacaoCorrelacao();
+
+    private void LimparNavegacaoCorrelacao()
+    {
+        CancelarBuscaCorrelacao();
+        _resultadoCorrelacao = null;
+        _analiseTemporalCorrelacao = null;
+        _eventosCorrelacionados.Clear();
+    }
+
+    private void CancelarBuscaCorrelacao()
+    {
+        var cts = Interlocked.Exchange(ref _correlationCts, null);
+        if (cts is not null)
+        {
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }
+            cts.Dispose();
+        }
+
+        _buscandoCorrelacao = false;
     }
 
     private void FiltrarPorTexto(string texto)
