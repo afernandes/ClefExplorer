@@ -16,7 +16,7 @@
     tempo de empacotamento pelo script e pelo workflow, ambos a partir deste valor.
   -->
   <PropertyGroup>
-    <ClefVersion>1.4.0</ClefVersion>
+    <ClefVersion>1.5.0</ClefVersion>
 
     <!-- Ignorado quando a build recebe /p:Version=... (propriedade global vence), que é
          como o release aplica a versão da tag. -->
