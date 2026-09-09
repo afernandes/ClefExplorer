@@ -1,0 +1,4 @@
+<label class="clef-col-item">
+    <input type="checkbox" checked="Marcada" @onchange="@(e => OnToggle.InvokeAsync((bool?)e.Value == true))" />
+    <span>@Titulo</span>
+</label>

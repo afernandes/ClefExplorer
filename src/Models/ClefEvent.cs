@@ -8,6 +8,8 @@ namespace ClefExplorer.Models
     {
         public DateTimeOffset? Timestamp { get; set; }
         public string? Level { get; set; }
+        /// <summary>Identificador reservado @i; distinto da propriedade de usuÃ¡rio @@i.</summary>
+        public ScalarValue? IdentificadorEvento { get; set; }
         public string? Message { get; set; }
         public string? MessageTemplate { get; set; }
         public string? Exception { get; set; }

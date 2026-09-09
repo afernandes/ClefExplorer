@@ -1,0 +1,18 @@
+@if (Entradas.Count == 0)
+{
+    <p class="clef-dialog-hint">Nada a destacar.</p>
+}
+else
+{
+    <div class="clef-stat-bars">
+        @foreach (var entrada in Entradas)
+        {
+            <button type="button" class="clef-stat-row" title="@($"Filtrar por: {entrada.Label}")"
+                    @onclick="@(() => OnSelect.InvokeAsync(entrada.Key))">
+                <span class="clef-stat-name">@entrada.Label</span>
+                <span class="clef-stat-track"><span class="clef-stat-fill" style="@Largura(entrada.Count)"></span></span>
+                <span class="clef-stat-count">@entrada.Count.ToString("N0")</span>
+            </button>
+        }
+    </div>
+}

@@ -347,10 +347,15 @@ namespace ClefExplorer.Services
                 }
             }
 
+            if (evento.IdentificadorEvento is { } identificador)
+                WriteJsonProperty(writer, "@i", identificador, ref primeiro);
+
             if (evento.Properties is not null)
             {
                 foreach (var propriedade in evento.Properties)
                 {
+                    if (propriedade.Key.Equals("@i", StringComparison.OrdinalIgnoreCase)
+                        && ReferenceEquals(propriedade.Value, evento.IdentificadorEvento)) continue;
                     WriteJsonProperty(writer, EscapeReservedName(propriedade.Key), propriedade.Value, ref primeiro);
                 }
             }

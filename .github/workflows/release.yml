@@ -74,6 +74,7 @@ jobs:
           -r win-x64
           --self-contained
           -p:PublishSingleFile=false
+          -p:Version=${{ steps.ver.outputs.version }}
           -o publish
 
       # Traz os pacotes já publicados para o vpk conseguir gerar o delta desta versão.

@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using ClefExplorer.Models;
 
 namespace ClefExplorer.Services
@@ -33,6 +33,8 @@ namespace ClefExplorer.Services
         private CancellationTokenSource? _operationCts;
         private int _isLoading;
         private long _stateVersion;
+        private long _sessionVersion;
+        public long SessionVersion => Volatile.Read(ref _sessionVersion);
         private bool _disposed;
 
         public event Action? Changed;
@@ -118,175 +120,110 @@ namespace ClefExplorer.Services
             var pathList = paths.ToArray();
             var operacao = StartOperation();
             var acquired = false;
-            var concluida = false;
-
+            var sessaoPublicada = false;
             try
             {
                 await _operationGate.WaitAsync(operacao.Token).ConfigureAwait(false);
                 acquired = true;
-
-                var descoberta = await Task.Run(
-                    () => _descoberta.Descobrir(
-                        pathList,
-                        operacao.Token,
-                        quantidade => ReportProgress(
-                            operacao,
-                            $"Descobrindo arquivos… {quantidade:N0}")),
-                    operacao.Token).ConfigureAwait(false);
-
+                var descoberta = await Task.Run(() => _descoberta.Descobrir(pathList, operacao.Token,
+                    quantidade => ReportProgress(operacao, $"Descobrindo arquivos… {quantidade:N0}")), operacao.Token).ConfigureAwait(false);
                 var falhas = new ConcurrentBag<LoadFailure>(descoberta.Falhas);
-                foreach (var falha in descoberta.Falhas)
-                {
-                    AppLog.Warning($"Falha ao descobrir '{falha.Path}': {falha.Reason}");
-                }
-
-                var arquivosCarregar = descoberta.Arquivos
-                    .Where(arquivo => descoberta.ArquivosExplicitos.Contains(arquivo)
-                        || (!_filtroArquivos.DeveIgnorar(arquivo)
-                            && !arquivo.EndsWith(".gz", StringComparison.OrdinalIgnoreCase)))
-                    .ToArray();
-
-                var eventos = new ConcurrentBag<ClefEvent>();
-                var offsets = new ConcurrentDictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-                var textosIgnorados = SnapshotIgnoredLogLines();
-                // Um pool por SESSÃO, compartilhado entre os arquivos lidos em paralelo e
-                // também com o tail: os mesmos templates e chaves se repetem em todos os
-                // arquivos da aplicação, e os eventos ingeridos ao vivo pagavam de novo por
-                // cada nível e cada chave (23% de memória a mais). Ele morre na carga
-                // seguinte — nada fica retido de uma sessão anterior.
+                var arquivosCarregar = descoberta.Arquivos.Where(arquivo => descoberta.ArquivosExplicitos.Contains(arquivo)
+                    || (!_filtroArquivos.DeveIgnorar(arquivo) && !arquivo.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))).ToArray();
                 var pool = new PoolDeTextos();
-                var opcoes = new ParallelOptions { CancellationToken = operacao.Token };
-                var arquivosLidos = 0;
-                var intervaloProgresso = Math.Max(1, arquivosCarregar.Length / 20);
+                var textosIgnorados = SnapshotIgnoredLogLines();
+                var pendentes = new ConcurrentQueue<LoteArquivoLog>();
+                var publicacaoGate = new object();
+                var ultimaPublicacao = Environment.TickCount64;
+                var processados = 0;
                 ReportProgress(operacao, $"Lendo 0/{arquivosCarregar.Length:N0} arquivos…");
 
-                // Publicação incremental: cada arquivo concluído entra numa fila e, no
-                // máximo a cada PublicacaoParcialMs, o que acumulou é mesclado no conjunto
-                // publicado. Quem abre uma pasta grande passa a LER os primeiros eventos em
-                // segundos, com o resto chegando por baixo — antes a tela ficava num
-                // spinner até o último arquivo terminar.
-                var lotesPendentes = new ConcurrentQueue<IReadOnlyList<ClefEvent>>();
-                var ultimaPublicacao = Environment.TickCount64;
-                var publicando = 0;
-                var metadadosPublicados = false;
-
-                void PublicarParcial()
+                void Publicar(bool forcar)
                 {
-                    if (Environment.TickCount64 - Volatile.Read(ref ultimaPublicacao) < PublicacaoParcialMs) return;
-                    // Um publicador por vez; quem perder a corrida deixa o lote na fila
-                    // para a próxima rodada — nada se perde, só atrasa um ciclo.
-                    if (Interlocked.Exchange(ref publicando, 1) == 1) return;
-                    try
+                    lock (publicacaoGate)
                     {
-                        var lote = new List<ClefEvent>();
-                        while (lotesPendentes.TryDequeue(out var parte)) lote.AddRange(parte);
-                        if (lote.Count == 0) return;
-                        lote.Sort(PorTimestampDecrescente);
-
+                        if (!forcar && Environment.TickCount64 - ultimaPublicacao < PublicacaoParcialMs) return;
+                        var lotes = new List<LoteArquivoLog>();
+                        while (pendentes.TryDequeue(out var lote)) lotes.Add(lote);
+                        if (lotes.Count == 0 && !forcar) return;
+                        var eventos = lotes.SelectMany(lote => lote.Leitura.Eventos).ToList();
+                        eventos.Sort(PorTimestampDecrescente);
+                        var novaSessao = false;
                         lock (_stateGate)
                         {
                             if (!IsCurrent(operacao)) return;
-
-                            // O primeiro lote leva junto os metadados da carga: eventos
-                            // novos ao lado da lista de arquivos da sessão ANTERIOR seria
-                            // um estado que nenhuma outra parte do app sabe interpretar.
-                            if (!metadadosPublicados)
+                            if (!sessaoPublicada)
                             {
-                                metadadosPublicados = true;
+                                sessaoPublicada = novaSessao = true;
                                 _fileName = pathList.Length == 1 ? pathList[0] : "Múltiplos locais";
+                                _poolSessao = pool;
                                 Volatile.Write(ref _openedPaths, pathList);
                                 Volatile.Write(ref _availableFiles, descoberta.Arquivos.ToArray());
-                                Volatile.Write(ref _loadedFiles, arquivosCarregar);
+                                Volatile.Write(ref _loadedFiles, Array.Empty<string>());
                                 Volatile.Write(ref _events, Array.Empty<ClefEvent>());
+                                PublicarOffsets(new Dictionary<string, long>(), Array.Empty<string>());
+                                Interlocked.Increment(ref _sessionVersion);
                             }
-
-                            Volatile.Write(ref _events, MesclarPorRegiao(Volatile.Read(ref _events), lote));
+                            Volatile.Write(ref _events, MesclarPorRegiao(Volatile.Read(ref _events), eventos));
+                            Volatile.Write(ref _loadedFiles, Concatenar(_loadedFiles, lotes.Select(lote => lote.Arquivo).ToArray()));
+                            lock (_fileOffsets)
+                            {
+                                foreach (var lote in lotes)
+                                {
+                                    if (lote.Leitura.OffsetFinal is { } offset) _fileOffsets[lote.Arquivo] = offset;
+                                    if (lote.Leitura.Checkpoint is { } checkpoint) _checkpoints[lote.Arquivo] = checkpoint;
+                                }
+                            }
+                            PublicarFalhas(falhas);
                             Interlocked.Increment(ref _stateVersion);
                         }
-
-                        Volatile.Write(ref ultimaPublicacao, Environment.TickCount64);
+                        ultimaPublicacao = Environment.TickCount64;
+                        if (novaSessao) PathsLoaded?.Invoke();
                         Changed?.Invoke();
                     }
-                    finally
-                    {
-                        Volatile.Write(ref publicando, 0);
-                    }
                 }
 
-                await Parallel.ForEachAsync(arquivosCarregar, opcoes, async (arquivo, token) =>
+                try
                 {
-                    try
+                    await Parallel.ForEachAsync(arquivosCarregar,
+                        new ParallelOptions { CancellationToken = operacao.Token }, async (arquivo, token) =>
                     {
-                        var leitura = await _leitor.LerAsync(arquivo, textosIgnorados, pool, token).ConfigureAwait(false);
-                        foreach (var evento in leitura.Eventos) eventos.Add(evento);
-                        if (leitura.Eventos.Count > 0) lotesPendentes.Enqueue(leitura.Eventos);
-                        if (leitura.OffsetFinal is { } offset) offsets[arquivo] = offset;
-
-                        if (leitura.LinhasInvalidas > 0)
+                        try
                         {
-                            falhas.Add(new LoadFailure(
-                                arquivo,
-                                $"{leitura.LinhasInvalidas} linha(s) CLEF inválida(s). {leitura.PrimeiroErro}".Trim()));
+                            var leitura = await _leitor.LerAsync(arquivo, textosIgnorados, pool, token).ConfigureAwait(false);
+                            if (leitura.LinhasInvalidas > 0)
+                                falhas.Add(new LoadFailure(arquivo, $"{leitura.LinhasInvalidas} linha(s) CLEF inválida(s). {leitura.PrimeiroErro}"));
+                            pendentes.Enqueue(new LoteArquivoLog(arquivo, leitura));
                         }
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        RegistrarFalha(falhas, arquivo, ex);
-                    }
-                    finally
-                    {
-                        PublicarParcial();
-                        var processados = Interlocked.Increment(ref arquivosLidos);
-                        if (processados == arquivosCarregar.Length || processados % intervaloProgresso == 0)
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception ex)
                         {
-                            ReportProgress(
-                                operacao,
-                                $"Lendo {processados:N0}/{arquivosCarregar.Length:N0} arquivos…");
+                            RegistrarFalha(falhas, arquivo, ex);
+                            // Falha de I/O permanece selecionada para uma nova tentativa no tail.
+                            pendentes.Enqueue(new LoteArquivoLog(arquivo,
+                                new ResultadoLeituraArquivoLog(Array.Empty<ClefEvent>(), null, 0, null)));
                         }
-                    }
-                }).ConfigureAwait(false);
-
-                operacao.Token.ThrowIfCancellationRequested();
-                if (!IsCurrent(operacao)) return;
-
-                var eventosOrdenados = eventos.ToArray();
-                Array.Sort(eventosOrdenados, PorTimestampDecrescente);
-
-                lock (_stateGate)
-                {
-                    if (!IsCurrent(operacao)) return;
-
-                    // O array publicado tem exatamente o tamanho do conteúdo. A List anterior
-                    // mantinha o array interno da MAIOR sessão já aberta: fechar 5 milhões de
-                    // eventos e abrir um arquivo pequeno deixava 40 MB de referências vazias
-                    // presas até o aplicativo ser fechado — os eventos eram coletados, o
-                    // array não.
-                    Volatile.Write(ref _events, eventosOrdenados);
-                    _fileName = pathList.Length == 1 ? pathList[0] : "Múltiplos locais";
-                    _poolSessao = pool;
-
-                    Volatile.Write(ref _openedPaths, pathList);
-                    Volatile.Write(ref _availableFiles, descoberta.Arquivos.ToArray());
-                    Volatile.Write(ref _loadedFiles, arquivosCarregar);
-                    PublicarFalhas(falhas);
-                    PublicarOffsets(offsets, arquivosCarregar);
-                    Interlocked.Increment(ref _stateVersion);
+                        finally
+                        {
+                            Publicar(false);
+                            ReportProgress(operacao, $"Lendo {Interlocked.Increment(ref processados):N0}/{arquivosCarregar.Length:N0} arquivos…");
+                        }
+                    }).ConfigureAwait(false);
+                    Publicar(true);
                 }
-
-                concluida = true;
+                catch (OperationCanceledException)
+                {
+                    // Somente os arquivos inteiramente lidos entram no parcial preservado.
+                    // A fila só é drenada após todos os leitores terem encerrado.
+                    if (sessaoPublicada || !pendentes.IsEmpty) Publicar(true);
+                    throw;
+                }
             }
-            catch (OperationCanceledException)
-            {
-                AppLog.Info("Carregamento cancelado.");
-            }
+            catch (OperationCanceledException) { AppLog.Info("Carregamento cancelado."); }
             finally
             {
                 if (acquired) _operationGate.Release();
-                FinishOperation(operacao, pathsLoaded: concluida);
+                FinishOperation(operacao, pathsLoaded: false);
             }
         }
 
@@ -323,6 +260,7 @@ namespace ClefExplorer.Services
                 var falhas = new ConcurrentBag<LoadFailure>();
                 var adicionados = new ConcurrentBag<ClefEvent>();
                 var offsets = new ConcurrentDictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+                var checkpoints = new ConcurrentDictionary<string, CheckpointArquivoLog>(StringComparer.OrdinalIgnoreCase);
                 var textosIgnorados = SnapshotIgnoredLogLines();
                 var opcoes = new ParallelOptions { CancellationToken = operacao.Token };
                 var arquivosLidos = 0;
@@ -336,6 +274,7 @@ namespace ClefExplorer.Services
                         var leitura = await _leitor.LerAsync(arquivo, textosIgnorados, pool, token).ConfigureAwait(false);
                         foreach (var evento in leitura.Eventos) adicionados.Add(evento);
                         if (leitura.OffsetFinal is { } offset) offsets[arquivo] = offset;
+                        if (leitura.Checkpoint is { } checkpoint) checkpoints[arquivo] = checkpoint;
                         if (leitura.LinhasInvalidas > 0)
                         {
                             falhas.Add(new LoadFailure(
@@ -377,6 +316,7 @@ namespace ClefExplorer.Services
                     if (!IsCurrent(operacao)) return;
 
                     Volatile.Write(ref _events, resultado);
+                    if (resultado.Length == 0) _poolSessao = new PoolDeTextos();
                     Volatile.Write(ref _loadedFiles, selecao);
                     PublicarFalhas(falhas);
 
@@ -385,11 +325,13 @@ namespace ClefExplorer.Services
                         foreach (var arquivo in remover)
                         {
                             _fileOffsets.Remove(arquivo);
+                            _checkpoints.Remove(arquivo);
                             _oversizedTailScanOffsets.Remove(arquivo);
                             _ultimaAtividadeTail.Remove(arquivo);
                         }
 
                         foreach (var offset in offsets) _fileOffsets[offset.Key] = offset.Value;
+                        foreach (var checkpoint in checkpoints) _checkpoints[checkpoint.Key] = checkpoint.Value;
                     }
 
                     Interlocked.Increment(ref _stateVersion);
@@ -510,6 +452,7 @@ namespace ClefExplorer.Services
 
         // --- Modo tail -------------------------------------------------------------
 
+        private readonly Dictionary<string, CheckpointArquivoLog> _checkpoints = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, long> _fileOffsets = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, long> _oversizedTailScanOffsets = new(StringComparer.OrdinalIgnoreCase);
 
@@ -638,10 +581,12 @@ namespace ClefExplorer.Services
 
             string[] caminhos;
             string[] conhecidos;
+            long sessao;
             lock (_stateGate)
             {
                 caminhos = Volatile.Read(ref _openedPaths);
                 conhecidos = Volatile.Read(ref _availableFiles);
+                sessao = SessionVersion;
             }
 
             if (caminhos.Length == 0) return;
@@ -669,13 +614,14 @@ namespace ClefExplorer.Services
             var novos = descoberta.Arquivos.Where(arquivo => !jaConhecidos.Contains(arquivo)).ToArray();
             if (novos.Length == 0) return;
 
-            AdotarArquivosNovos(novos, cancellationToken);
+            AdotarArquivosNovos(novos, cancellationToken, sessao);
         }
 
-        private void AdotarArquivosNovos(string[] novos, CancellationToken cancellationToken)
+        private void AdotarArquivosNovos(string[] novos, CancellationToken cancellationToken, long sessao)
         {
             var acompanhar = new List<string>(novos.Length);
             var offsets = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            var checkpoints = new Dictionary<string, CheckpointArquivoLog>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var arquivo in novos)
             {
@@ -695,7 +641,10 @@ namespace ClefExplorer.Services
                     // Offset no FIM: o acompanhamento mostra o que for escrito daqui para a
                     // frente. Adotar do byte 0 despejaria de uma vez um arquivo inteiro que
                     // por acaso tenha sido copiado para a pasta.
-                    offsets[arquivo] = new FileInfo(arquivo).Length;
+                    using var stream = new FileStream(arquivo, FileMode.Open, FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete);
+                    offsets[arquivo] = stream.Length;
+                    checkpoints[arquivo] = CheckpointArquivoLog.Capturar(stream, offsets[arquivo]);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -710,7 +659,7 @@ namespace ClefExplorer.Services
             {
                 // Uma carga em andamento vai republicar a lista inteira a partir da própria
                 // descoberta dela; adotar por cima só criaria duplicata.
-                if (IsLoading) return;
+                if (IsLoading || SessionVersion != sessao) return;
 
                 Volatile.Write(ref _availableFiles, Concatenar(Volatile.Read(ref _availableFiles), novos));
                 if (acompanhar.Count > 0)
@@ -719,6 +668,7 @@ namespace ClefExplorer.Services
                     lock (_fileOffsets)
                     {
                         foreach (var offset in offsets) _fileOffsets[offset.Key] = offset.Value;
+                        foreach (var checkpoint in checkpoints) _checkpoints[checkpoint.Key] = checkpoint.Value;
                     }
                 }
 
@@ -747,6 +697,7 @@ namespace ClefExplorer.Services
             var textosIgnorados = SnapshotIgnoredLogLines();
             var novos = new List<ClefEvent>();
             var novosOffsets = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            var novosCheckpoints = new Dictionary<string, CheckpointArquivoLog>(StringComparer.OrdinalIgnoreCase);
 
             var agora = Environment.TickCount64;
             var inicioRodizio = _rodizioTail;
@@ -790,6 +741,7 @@ namespace ClefExplorer.Services
                     if (trecho.NovoOffset is { } offset)
                     {
                         novosOffsets[arquivo] = offset;
+                        if (trecho.Checkpoint is { } checkpoint) novosCheckpoints[arquivo] = checkpoint;
                         MarcarAtividadeTail(arquivo, agora);
                     }
                 }
@@ -819,6 +771,7 @@ namespace ClefExplorer.Services
                 lock (_fileOffsets)
                 {
                     foreach (var offset in novosOffsets) _fileOffsets[offset.Key] = offset.Value;
+                    foreach (var checkpoint in novosCheckpoints) _checkpoints[checkpoint.Key] = checkpoint.Value;
                 }
 
                 if (novos.Count > 0)
@@ -903,7 +856,7 @@ namespace ClefExplorer.Services
                 : indice >= inicio || indice < fim;
         }
 
-        private sealed record ResultadoTail(IReadOnlyList<ClefEvent> Eventos, long? NovoOffset);
+
 
         private async Task<ResultadoTail> ReadNewEventsAsync(
             string arquivo,
@@ -918,30 +871,16 @@ namespace ClefExplorer.Services
                 arquivo,
                 FileMode.Open,
                 FileAccess.Read,
-                FileShare.ReadWrite,
+                FileShare.ReadWrite | FileShare.Delete,
                 bufferSize: TailScanBufferBytes,
                 useAsync: true);
 
-            if (stream.Length < offset)
+            CheckpointArquivoLog? checkpoint;
+            lock (_fileOffsets) _checkpoints.TryGetValue(arquivo, out checkpoint);
+            if (stream.Length < offset || (checkpoint is not null && !checkpoint.Corresponde(stream)))
             {
                 offset = 0;
-                lock (_fileOffsets) { _oversizedTailScanOffsets.Remove(arquivo); }
-            }
-            else if (offset > 0 && stream.Length > offset)
-            {
-                // Truncado e reescrito MAIOR que o offset antigo — a única rotação que a
-                // comparação de tamanho não enxerga (pego por prova de ponta a ponta: o
-                // conteúdo novo era maior que o antigo e o tail lia do meio de uma linha,
-                // descartando-a como inválida). O offset avança sempre até logo depois de
-                // um '\n'; se o byte anterior não é '\n', o conteúdo sob o offset não é o
-                // que foi lido antes.
-                stream.Seek(offset - 1, SeekOrigin.Begin);
-                if (stream.ReadByte() != '\n')
-                {
-                    offset = 0;
-                    stream.Seek(0, SeekOrigin.Begin);
-                    lock (_fileOffsets) { _oversizedTailScanOffsets.Remove(arquivo); }
-                }
+                lock (_fileOffsets) _oversizedTailScanOffsets.Remove(arquivo);
             }
             if (stream.Length == offset) return new ResultadoTail(Array.Empty<ClefEvent>(), null);
 
@@ -961,7 +900,8 @@ namespace ClefExplorer.Services
                         arquivo,
                         offset + lidos,
                         cancellationToken).ConfigureAwait(false);
-                    return new ResultadoTail(Array.Empty<ClefEvent>(), depoisDaLinha);
+                    return new ResultadoTail(Array.Empty<ClefEvent>(), depoisDaLinha,
+                        depoisDaLinha is { } fim ? CheckpointArquivoLog.Capturar(stream, fim) : null);
                 }
 
                 return new ResultadoTail(Array.Empty<ClefEvent>(), null);
@@ -987,7 +927,8 @@ namespace ClefExplorer.Services
             }
 
             lock (_fileOffsets) { _oversizedTailScanOffsets.Remove(arquivo); }
-            return new ResultadoTail(leitura.Eventos, offset + ultimaQuebra + 1);
+            var novoOffset = offset + ultimaQuebra + 1;
+            return new ResultadoTail(leitura.Eventos, novoOffset, CheckpointArquivoLog.Capturar(stream, novoOffset));
         }
 
         private async Task<long?> FindEndOfOversizedLineAsync(
@@ -1045,6 +986,7 @@ namespace ClefExplorer.Services
             lock (_fileOffsets)
             {
                 _fileOffsets.Clear();
+                _checkpoints.Clear();
                 _oversizedTailScanOffsets.Clear();
                 _ultimaAtividadeTail.Clear();
                 foreach (var arquivo in arquivosCarregados)

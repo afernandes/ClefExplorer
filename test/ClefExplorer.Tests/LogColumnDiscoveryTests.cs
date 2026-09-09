@@ -352,7 +352,7 @@ public class LogColumnDiscoveryTests
     [Fact]
     public void A_number_written_as_text_still_sorts_as_a_number()
     {
-        Assert.Equal(123d, LogColumnDiscovery.GetSortValue(Event(("Ms", "123")), "Ms", ColumnValueKind.Number));
+        Assert.Equal(NumeroLog.Criar(123), LogColumnDiscovery.GetSortValue(Event(("Ms", "123")), "Ms", ColumnValueKind.Number));
     }
 
     [Fact]
