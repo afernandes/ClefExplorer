@@ -136,6 +136,7 @@ namespace ClefExplorer.Services
                 var publicacaoGate = new object();
                 var ultimaPublicacao = Environment.TickCount64;
                 var processados = 0;
+                var intervaloProgresso = Math.Max(1, (int)Math.Ceiling(arquivosCarregar.Length / 20d));
                 ReportProgress(operacao, $"Lendo 0/{arquivosCarregar.Length:N0} arquivos…");
 
                 void Publicar(bool forcar)
@@ -205,8 +206,13 @@ namespace ClefExplorer.Services
                         }
                         finally
                         {
-                            Publicar(false);
-                            ReportProgress(operacao, $"Lendo {Interlocked.Increment(ref processados):N0}/{arquivosCarregar.Length:N0} arquivos…");
+                            lock (publicacaoGate)
+                            {
+                                Publicar(false);
+                                var concluidos = ++processados;
+                                if (concluidos == arquivosCarregar.Length || concluidos % intervaloProgresso == 0)
+                                    ReportProgress(operacao, $"Lendo {concluidos:N0}/{arquivosCarregar.Length:N0} arquivos…");
+                            }
                         }
                     }).ConfigureAwait(false);
                     Publicar(true);

@@ -13,6 +13,7 @@
 - Preserva o identificador CLEF reservado `@i`, inclusive na presença da propriedade de usuário `@@i`.
 - Limita caches, evita compilar templates para mensagens prontas e libera referências à seleção e correlação anteriores.
 
-Validação: 604 testes automatizados aprovados e fluxos de interface exercitados no WebView2.
+Validação: 605 testes automatizados aprovados e fluxos de interface exercitados no WebView2.
 
 O acompanhamento permanece orientado a append/rotação: edições arbitrárias dentro de arquivos grandes que preservem identidade e amostras verificadas podem exigir recarregamento manual. O conjunto de eventos carregados continua em memória.
+

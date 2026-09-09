@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -222,8 +222,8 @@ namespace ClefExplorer.Services
 
             // O @i entra por último na lista, exatamente como no leitor oficial.
             var identificadorEvento = temEventId ? new ScalarValue(eventId) : null;
-            // A projeÃ§Ã£o legada continua visÃ­vel em Properties. Uma propriedade @@i explÃ­cita
-            // tem identidade prÃ³pria e nÃ£o pode ser substituÃ­da pelo identificador reservado.
+            // A projeção legada continua visível em Properties. Uma propriedade @@i explícita
+            // tem identidade própria e não pode ser substituída pelo identificador reservado.
             if (identificadorEvento is not null && !(propriedades?.Any(p => p.Name.Equals("@i", StringComparison.OrdinalIgnoreCase)) ?? false))
                 Acrescentar(ref propriedades, cache.Compartilhar("@i"), identificadorEvento, substituir: false);
 
