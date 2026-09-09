@@ -64,7 +64,7 @@
                         <div class="clef-col-chooser">
                             @foreach (var col in LogGridColumns.Fixed)
                             {
-                                <LogColumnOption Campo="col.Key" Titulo="col.Title" Marcada="VisibleColumns.Contains(col.Key)" OnToggle="@(v => Alternar(col.Key, v))" />
+                                <LogColumnOption Campo="@col.Key" Titulo="@col.Title" Marcada="VisibleColumns.Contains(col.Key)" OnToggle="@(v => Alternar(col.Key, v))" />
                             }
 
                             @if (ColunasDePropriedade.Count > 0)
@@ -72,7 +72,7 @@
                                 <div class="clef-col-section">Propriedades</div>
                                 @foreach (var col in ColunasDePropriedade)
                                 {
-                                    <LogColumnOption Campo="col.Key" Titulo="col.Title" Marcada="VisibleColumns.Contains(col.Key)" OnToggle="@(v => Alternar(col.Key, v))" />
+                                    <LogColumnOption Campo="@col.Key" Titulo="@col.Title" Marcada="VisibleColumns.Contains(col.Key)" OnToggle="@(v => Alternar(col.Key, v))" />
                                 }
                             }
 
@@ -81,7 +81,7 @@
                                 <div class="clef-col-section">Campos da mensagem</div>
                                 @foreach (var col in ColunasDeTemplate)
                                 {
-                                    <LogColumnOption Campo="col.Key" Titulo="col.Title" Marcada="VisibleColumns.Contains(col.Key)" OnToggle="@(v => Alternar(col.Key, v))" />
+                                    <LogColumnOption Campo="@col.Key" Titulo="@col.Title" Marcada="VisibleColumns.Contains(col.Key)" OnToggle="@(v => Alternar(col.Key, v))" />
                                 }
                             }
                         </div>

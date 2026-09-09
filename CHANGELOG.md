@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.2
+
+- Corrige os títulos do seletor de colunas, que exibiam o texto literal `col.Title` após a extração do componente na versão 1.5.1.
+- Corrige também o binding da chave das opções nos grupos de colunas fixas, propriedades e campos da mensagem.
+- Adiciona regressão que abre o seletor do grid e verifica os títulos renderizados.
+
+Validação: 606 testes aprovados; nomes e seleção de colunas conferidos no WebView2 real.
+
 ## 1.5.1
 
 - Corrige cancelamento de cargas parciais e publicação dos offsets usados pelo acompanhamento ao vivo.
