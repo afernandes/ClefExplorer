@@ -108,6 +108,21 @@ public sealed class IntegridadeVisualizacaoTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Renderizar_SeletorDeColunas_ExibeTitulosDasColunasDoGrid()
+    {
+        await _store.LoadFromFile(Arquivo("dados.clef", Linha));
+        _context.Services.GetRequiredService<UiPreferencesService>().SetViewMode(LogViewMode.Grid);
+        var tela = _context.Render<LogViewer>();
+        tela.WaitForAssertion(() => Assert.Single(Eventos(tela.Instance)));
+        tela.FindAll("button").Single(b => b.TextContent.Trim() == "Colunas").Click();
+        var titulos = tela.FindAll(".clef-col-item span").Select(e => e.TextContent.Trim()).ToArray();
+        Assert.Contains("Data/hora", titulos);
+        Assert.Contains("Mensagem", titulos);
+        Assert.Contains("Id", titulos);
+        Assert.DoesNotContain("col.Title", titulos);
+    }
+
+    [Fact]
     public async Task ExportarFiltrados_FiltroDeColunaAtivo_ExportaMesmoConjuntoDaTabela()
     {
         await _store.LoadFromFile(Arquivo("dados.clef", Linha + Linha.Replace("123", "456")));
