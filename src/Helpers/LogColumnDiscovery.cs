@@ -244,7 +244,7 @@ namespace ClefExplorer.Helpers
             return bruto switch
             {
                 byte or sbyte or short or ushort or int or uint
-                    or long or ulong or float or double or decimal => ColumnValueKind.Number,
+                    or long or ulong or float or double or decimal or System.Numerics.BigInteger => ColumnValueKind.Number,
                 DateTime or DateTimeOffset => ColumnValueKind.Date,
                 bool => ColumnValueKind.Boolean,
                 _ => ColumnValueKind.Text,
@@ -270,9 +270,7 @@ namespace ClefExplorer.Helpers
             {
                 // O próprio ClefEvent pode trazer o número já como int/long/double; e um log
                 // que grave o valor como string ("123") ainda ordena certo por causa do parse.
-                ColumnValueKind.Number => bruto is string s
-                    ? (double.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var d) ? d : (double?)null)
-                    : Convert.ToDouble(bruto, CultureInfo.InvariantCulture),
+                ColumnValueKind.Number => NumeroLog.Criar(bruto),
 
                 ColumnValueKind.Date => bruto switch
                 {

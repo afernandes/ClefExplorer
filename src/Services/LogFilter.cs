@@ -53,6 +53,8 @@ namespace ClefExplorer.Services
         /// digitada. Padrão <c>false</c>: quem não garante a ordem continua seguro.
         /// </summary>
         public bool InputAlreadySorted { get; init; }
+        public FiltroRanking? Ranking { get; init; }
+        public IReadOnlyList<FiltroColunaLog> FiltrosColuna { get; init; } = Array.Empty<FiltroColunaLog>();
     }
 
     /// <summary>
@@ -249,6 +251,10 @@ namespace ClefExplorer.Services
 
         private static bool PassaPelosFiltrosEstruturais(ClefEvent evento, LogFilterCriteria criteria)
         {
+            if (criteria.Ranking is { } ranking && !ranking.Corresponde(evento)) return false;
+            foreach (var filtro in criteria.FiltrosColuna)
+                if (!filtro.Corresponde(evento)) return false;
+
             if (criteria.VisibleFiles is { } arquivos
                 && (evento.SourceFile is null || !arquivos.Contains(evento.SourceFile)))
             {

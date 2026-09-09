@@ -1,0 +1,30 @@
+<div class="column-filters">
+    <OmniPopover Open="_aberto" OpenChanged="@(valor => _aberto = valor)" Width="360px">
+        <Trigger>
+            <OmniButton Text="@($"Filtros por coluna{(Filtros.Count == 0 ? "" : $" ({Filtros.Count})")}")"
+                        Icon="filter" Size="ComponentSize.Sm" Variant="ButtonVariant.Ghost" />
+        </Trigger>
+        <ChildContent>
+            <div class="filter-editor">
+                <p>Os filtros valem para lista, tabela, estatísticas e exportação.</p>
+                @foreach (var coluna in Campos)
+                {
+                    <label @key="coluna.Key">
+                        <span>@coluna.Title</span>
+                        <OmniTextBox Value="@Valor(coluna.Key)" ValueChanged="@(texto => Alterar(coluna, texto))"
+                                     Placeholder="Contém…" Clearable="true" />
+                    </label>
+                }
+            </div>
+        </ChildContent>
+    </OmniPopover>
+    @foreach (var filtro in Filtros)
+    {
+        <span class="filter-chip" title="@filtro.Texto">@filtro.Campo: @filtro.Texto</span>
+    }
+    @if (Filtros.Count > 0)
+    {
+        <OmniButton Text="Limpar filtros de coluna" Icon="x" Size="ComponentSize.Sm" Variant="ButtonVariant.Ghost"
+                    OnClick="@(() => FiltrosChanged.InvokeAsync(Array.Empty<FiltroColunaLog>()))" />
+    }
+</div>

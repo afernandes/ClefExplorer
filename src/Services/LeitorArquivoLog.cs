@@ -4,48 +4,6 @@ using ClefExplorer.Models;
 
 namespace ClefExplorer.Services
 {
-    /// <summary>Eventos e metadados obtidos durante a leitura de um arquivo.</summary>
-    public sealed record ResultadoLeituraArquivoLog(
-        IReadOnlyList<ClefEvent> Eventos,
-        long? OffsetFinal,
-        int LinhasInvalidas,
-        string? PrimeiroErro);
-
-    public interface ILeitorArquivoLog
-    {
-        /// <param name="pool">
-        /// Compartilha as strings repetidas entre eventos (nível, template, chaves de
-        /// propriedade). Opcional: sem ele a leitura funciona igual, só ocupa mais memória.
-        /// </param>
-        Task<ResultadoLeituraArquivoLog> LerAsync(
-            string arquivo,
-            IReadOnlyList<string> textosIgnorados,
-            PoolDeTextos? pool = null,
-            CancellationToken cancellationToken = default);
-
-        /// <summary>
-        /// Interpreta um bloco de bytes já lido do arquivo, contendo apenas linhas completas.
-        /// </summary>
-        /// <remarks>
-        /// Existe para o acompanhamento ao vivo, que precisa da mesma interpretação da carga
-        /// mas não pode delegar a abertura do arquivo: quem acompanha é dono do offset, do
-        /// reposicionamento após truncamento e do descarte da linha grande demais. Sem este
-        /// método o tail chamava o parser estático e um leitor injetado cobria só a carga.
-        /// <para><c>OffsetFinal</c> volta nulo — a posição no arquivo é de quem leu o bloco.</para>
-        /// </remarks>
-        /// <param name="inicioDoArquivo">
-        /// Informa que o bloco começa no byte 0. Só então o BOM pode ser descartado: os mesmos
-        /// três bytes no meio do arquivo são conteúdo de uma linha válida.
-        /// </param>
-        ResultadoLeituraArquivoLog LerTrecho(
-            ReadOnlySpan<byte> bloco,
-            string arquivo,
-            IReadOnlyList<string> textosIgnorados,
-            bool inicioDoArquivo,
-            PoolDeTextos? pool = null,
-            CancellationToken cancellationToken = default);
-    }
-
     /// <summary>
     /// Responsável exclusivamente por abrir e interpretar arquivos CLEF. O processamento
     /// por linha permite isolar registros inválidos sem perder os eventos posteriores.
@@ -61,6 +19,8 @@ namespace ClefExplorer.Services
         // grande em @x é comum).
         private const int TamanhoBuffer = 64 * 1024;
 
+        public const int LimitePadraoLinhaBytes = 16 * 1024 * 1024;
+        private readonly int _limiteLinhaBytes;
         private readonly long _limiarParalelo;
         private readonly long _segmentoMinimo;
 
@@ -79,10 +39,13 @@ namespace ClefExplorer.Services
         /// Menor fatia que vale um worker: abaixo disso o custo de abrir o stream e alinhar
         /// a fronteira supera o ganho de paralelismo.
         /// </param>
-        public LeitorArquivoLog(long limiarParalelo, long segmentoMinimo)
+        public LeitorArquivoLog(long limiarParalelo, long segmentoMinimo, int limiteLinhaBytes = LimitePadraoLinhaBytes)
         {
             ArgumentOutOfRangeException.ThrowIfLessThan(limiarParalelo, 1);
             ArgumentOutOfRangeException.ThrowIfLessThan(segmentoMinimo, 1);
+            ArgumentOutOfRangeException.ThrowIfLessThan(limiteLinhaBytes, 1);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(limiteLinhaBytes, 64 * 1024 * 1024);
+            _limiteLinhaBytes = limiteLinhaBytes;
             _limiarParalelo = limiarParalelo;
             _segmentoMinimo = segmentoMinimo;
         }
@@ -100,7 +63,7 @@ namespace ClefExplorer.Services
                 arquivo,
                 FileMode.Open,
                 FileAccess.Read,
-                FileShare.ReadWrite,
+                FileShare.ReadWrite | FileShare.Delete,
                 bufferSize: 64 * 1024,
                 useAsync: true);
 
@@ -201,10 +164,14 @@ namespace ClefExplorer.Services
                 primeiroErro ??= parte.PrimeiroErro;
             }
 
-            return new ResultadoLeituraArquivoLog(eventos, comprimento, invalidas, primeiroErro);
+            var ultimoOffset = partes[^1].OffsetFinal ?? (comprimento - fronteiras[^2]);
+            // Segmentos retornam offsets relativos; o último preserva eventual JSON incompleto.
+            var offset = fronteiras[^2] + ultimoOffset;
+            return new ResultadoLeituraArquivoLog(eventos, offset, invalidas, primeiroErro)
+            { Checkpoint = CheckpointArquivoLog.Capturar(stream, offset) };
         }
 
-        private static async Task<ResultadoLeituraArquivoLog> LerSegmentoAsync(
+        private async Task<ResultadoLeituraArquivoLog> LerSegmentoAsync(
             string arquivo,
             long inicio,
             long comprimento,
@@ -217,7 +184,7 @@ namespace ClefExplorer.Services
                 arquivo,
                 FileMode.Open,
                 FileAccess.Read,
-                FileShare.ReadWrite,
+                FileShare.ReadWrite | FileShare.Delete,
                 bufferSize: TamanhoBuffer,
                 useAsync: true);
             stream.Position = inicio;
@@ -226,7 +193,7 @@ namespace ClefExplorer.Services
                 new RecorteDeLeitura(stream, comprimento),
                 arquivo,
                 textosIgnorados,
-                offsetFinal: null,
+                offsetFinal: () => stream.Position - inicio,
                 cache,
                 verificarBom: primeiroSegmento,
                 cancellationToken).ConfigureAwait(false);
@@ -316,7 +283,7 @@ namespace ClefExplorer.Services
             }
         }
 
-        private static async Task<ResultadoLeituraArquivoLog> LerStreamAsync(
+        private async Task<ResultadoLeituraArquivoLog> LerStreamAsync(
             Stream stream,
             string arquivo,
             IReadOnlyList<string> textosIgnorados,
@@ -328,6 +295,10 @@ namespace ClefExplorer.Services
             var acumulador = new Acumulador(arquivo, textosIgnorados, cache);
             var buffer = ArrayPool<byte>.Shared.Rent(TamanhoBuffer);
             var preenchido = 0;
+            var descartando = false;
+            long totalLido = 0;
+            long inicioLinhaExcedente = 0;
+            var ultimaIncompleta = 0;
             // Segmentos que não são o primeiro começam no meio do arquivo: três bytes
             // EF BB BF ali seriam conteúdo de linha, nunca BOM.
             var bomVerificado = !verificarBom;
@@ -337,12 +308,20 @@ namespace ClefExplorer.Services
                 while (true)
                 {
                     var lidos = await stream
-                        .ReadAsync(buffer.AsMemory(preenchido, buffer.Length - preenchido), cancellationToken)
+                        .ReadAsync(buffer.AsMemory(preenchido, Math.Min(buffer.Length, _limiteLinhaBytes + 1) - preenchido), cancellationToken)
                         .ConfigureAwait(false);
                     if (lidos == 0) break;
                     preenchido += lidos;
+                    totalLido += lidos;
 
                     var inicio = 0;
+                    if (descartando)
+                    {
+                        var quebra = buffer.AsSpan(0, preenchido).IndexOf((byte)'\n');
+                        if (quebra < 0) { preenchido = 0; continue; }
+                        inicio = quebra + 1;
+                        descartando = false;
+                    }
                     if (!bomVerificado && preenchido >= 3)
                     {
                         bomVerificado = true;
@@ -358,10 +337,17 @@ namespace ClefExplorer.Services
                     if (consumido > 0 && resto > 0) buffer.AsSpan(consumido, resto).CopyTo(buffer);
                     preenchido = resto;
 
-                    if (preenchido == buffer.Length)
+                    if (preenchido > _limiteLinhaBytes)
                     {
-                        // A linha não coube: dobra o buffer em vez de desistir dela.
-                        var maior = ArrayPool<byte>.Shared.Rent(buffer.Length * 2);
+                        inicioLinhaExcedente = totalLido - preenchido;
+                        acumulador.RegistrarLinhaExcedente(inicioLinhaExcedente, _limiteLinhaBytes);
+                        descartando = true;
+                        preenchido = 0;
+                    }
+                    else if (preenchido == buffer.Length)
+                    {
+                        // Crescimento limitado a uma linha mais o delimitador.
+                        var maior = ArrayPool<byte>.Shared.Rent(Math.Min(buffer.Length * 2, _limiteLinhaBytes + 1));
                         buffer.AsSpan(0, preenchido).CopyTo(maior);
                         ArrayPool<byte>.Shared.Return(buffer);
                         buffer = maior;
@@ -372,7 +358,8 @@ namespace ClefExplorer.Services
                 if (preenchido > 0)
                 {
                     var inicio = !bomVerificado && ComecaComBom(buffer.AsSpan(0, preenchido)) ? 3 : 0;
-                    acumulador.ProcessarUltimaLinha(buffer.AsSpan(inicio, preenchido - inicio), cancellationToken);
+                    if (!acumulador.ProcessarUltimaLinha(buffer.AsSpan(inicio, preenchido - inicio), cancellationToken))
+                        ultimaIncompleta = preenchido;
                 }
             }
             finally
@@ -380,11 +367,19 @@ namespace ClefExplorer.Services
                 ArrayPool<byte>.Shared.Return(buffer);
             }
 
+            // Uma linha excedente ainda sem delimitador continua pertencendo ao mesmo
+            // registro. O tail deve descartá-la inteira, nunca interpretar seu sufixo.
+            var bytesPendentes = descartando ? totalLido - inicioLinhaExcedente : ultimaIncompleta;
             return new ResultadoLeituraArquivoLog(
                 acumulador.Eventos,
-                offsetFinal?.Invoke(),
+                offsetFinal is null ? null : offsetFinal() - bytesPendentes,
                 acumulador.LinhasInvalidas,
-                acumulador.PrimeiroErro);
+                acumulador.PrimeiroErro)
+            {
+                Checkpoint = stream is FileStream arquivoStream
+                    ? CheckpointArquivoLog.Capturar(arquivoStream, arquivoStream.Position - bytesPendentes)
+                    : null
+            };
         }
 
         /// <inheritdoc />
@@ -472,23 +467,30 @@ namespace ClefExplorer.Services
                 return consumido;
             }
 
-            public void ProcessarUltimaLinha(ReadOnlySpan<byte> bloco, CancellationToken cancellationToken) =>
+            public bool ProcessarUltimaLinha(ReadOnlySpan<byte> bloco, CancellationToken cancellationToken) =>
                 Processar(bloco, cancellationToken);
 
-            private void Processar(ReadOnlySpan<byte> linha, CancellationToken cancellationToken)
+            public void RegistrarLinhaExcedente(long offset, int limite)
+            {
+                LinhasInvalidas++;
+                PrimeiroErro ??= $"Linha em '{_arquivo}', byte {offset}, excedeu o limite de {limite} bytes.";
+            }
+
+            private bool Processar(ReadOnlySpan<byte> linha, CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (linha.Length > 0 && linha[^1] == (byte)'\r') linha = linha[..^1];
-                if (LeitorClef.EhLinhaEmBranco(linha)) return;
+                if (LeitorClef.EhLinhaEmBranco(linha)) return true;
 
                 if (!LeitorClef.TentarLer(linha, _arquivo, _cache, out var evento, out var erro))
                 {
                     LinhasInvalidas++;
                     PrimeiroErro ??= erro;
-                    return;
+                    return false;
                 }
 
                 if (!DeveIgnorar(evento!, _textosIgnorados)) Eventos.Add(evento!);
+                return true;
             }
         }
     }

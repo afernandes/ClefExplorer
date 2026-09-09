@@ -20,6 +20,9 @@ namespace ClefExplorer.Services
         // Concurrent porque a carga lê vários arquivos em paralelo, e o ganho só é pleno
         // quando o pool é compartilhado entre eles (os mesmos templates se repetem em
         // todos os arquivos de uma mesma aplicação).
+        private readonly object _admissao = new();
+        private int _totalTextos;
+        public const int LimiteTextos = 65536;
         private readonly ConcurrentDictionary<string, string> _textos = new(StringComparer.Ordinal);
 
         /// <summary>Devolve a instância compartilhada para este texto.</summary>
@@ -27,7 +30,15 @@ namespace ClefExplorer.Services
         {
             if (texto is null) return null;
             if (texto.Length == 0) return string.Empty;
-            return _textos.GetOrAdd(texto, texto);
+            if (_textos.TryGetValue(texto, out var existente)) return existente;
+            if (texto.Length > 4096 || Volatile.Read(ref _totalTextos) >= LimiteTextos) return texto;
+            lock (_admissao)
+            {
+                if (_textos.TryGetValue(texto, out existente)) return existente;
+                if (_totalTextos < LimiteTextos && _textos.TryAdd(texto, texto))
+                    Interlocked.Increment(ref _totalTextos);
+                return texto;
+            }
         }
 
         /// <summary>Quantos valores distintos o pool guarda (diagnóstico).</summary>

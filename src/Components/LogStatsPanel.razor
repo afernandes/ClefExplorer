@@ -1,4 +1,4 @@
-@using ClefExplorer.Models
+﻿@using ClefExplorer.Models
 @using ClefExplorer.Helpers
 @using Omni.Blazor.Models
 
@@ -64,104 +64,19 @@
 
             @* --- Rankings ------------------------------------------------------ *@
             <OmniCard Title="Origens mais frequentes" Class="clef-stats-card">
-                @RenderRanking(Stats.TopSources, OnFilterText)
+                <LogRanking Entradas="Stats.TopSources" OnSelect="@(chave => OnFilterRanking.InvokeAsync(new FiltroRanking(TipoFiltroRanking.Origem, chave)))" />
             </OmniCard>
 
             <OmniCard Title="Mensagens mais repetidas" Class="clef-stats-card">
-                @RenderRanking(Stats.TopMessages, OnFilterText)
+                <LogRanking Entradas="Stats.TopMessages" OnSelect="@(chave => OnFilterRanking.InvokeAsync(new FiltroRanking(TipoFiltroRanking.Mensagem, chave)))" />
             </OmniCard>
 
             @if (Stats.TopExceptions.Count > 0)
             {
                 <OmniCard Title="Exceções mais frequentes" Class="clef-stats-card clef-stats-wide">
-                    @RenderRanking(Stats.TopExceptions, OnFilterText)
+                    <LogRanking Entradas="Stats.TopExceptions" OnSelect="@(chave => OnFilterRanking.InvokeAsync(new FiltroRanking(TipoFiltroRanking.Excecao, chave)))" />
                 </OmniCard>
             }
         </div>
     }
 </div>
-
-@code {
-    [Parameter] public LogStats Stats { get; set; } = new();
-
-    /// <summary>Clique num nível aplica o filtro rápido correspondente.</summary>
-    [Parameter] public EventCallback<string> OnFilterLevel { get; set; }
-
-    /// <summary>Clique numa origem/mensagem/exceção joga o texto na busca.</summary>
-    [Parameter] public EventCallback<string> OnFilterText { get; set; }
-
-    private int MaiorNivel => Stats.ByLevel.Count == 0 ? 1 : Stats.ByLevel.Max(e => e.Count);
-
-    private string PercentualErro =>
-        Stats.Total == 0 ? "0%" : (Stats.ErrorCount / (double)Stats.Total).ToString("P1");
-
-    private static string Largura(int valor, int maximo) =>
-        $"width: {(maximo <= 0 ? 0 : valor * 100.0 / maximo).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}%";
-
-    private RenderFragment RenderRanking(IReadOnlyList<StatEntry> entradas, EventCallback<string> aoClicar) => __builder =>
-    {
-        if (entradas.Count == 0)
-        {
-            <p class="clef-dialog-hint">Nada a destacar.</p>
-        }
-        else
-        {
-            var maior = entradas.Max(e => e.Count);
-            <div class="clef-stat-bars">
-                @foreach (var entrada in entradas)
-                {
-                    var e = entrada;
-                    <button type="button" class="clef-stat-row" title="@($"Filtrar por: {e.Label}")"
-                            @onclick="@(() => aoClicar.InvokeAsync(e.Key))">
-                        <span class="clef-stat-name">@e.Label</span>
-                        <span class="clef-stat-track"><span class="clef-stat-fill" style="@Largura(e.Count, maior)"></span></span>
-                        <span class="clef-stat-count">@e.Count.ToString("N0")</span>
-                    </button>
-                }
-            </div>
-        }
-    };
-
-    /// <summary>Duas séries: o volume total e, sobreposto, quanto dele é erro.</summary>
-    private IEnumerable<ChartSeries> SerieTimeline => new[]
-    {
-        new ChartSeries
-        {
-            Title = "Eventos",
-            Type = ChartSeriesType.Column,
-            Points = Stats.Timeline.Select(b => new ChartDataPoint
-            {
-                Category = b.Start.ToString(FormatoDaFatia),
-                Value = b.Total,
-            }).ToList(),
-        },
-        new ChartSeries
-        {
-            Title = "Erros",
-            Type = ChartSeriesType.Column,
-            Points = Stats.Timeline.Select(b => new ChartDataPoint
-            {
-                Category = b.Start.ToString(FormatoDaFatia),
-                Value = b.Errors,
-            }).ToList(),
-        },
-    };
-
-    /// <summary>O eixo mostra só o que distingue as fatias: hora para períodos curtos, data para longos.</summary>
-    private string FormatoDaFatia => Stats.BucketSize >= TimeSpan.FromDays(1) ? "dd/MM"
-        : Stats.BucketSize >= TimeSpan.FromHours(1) ? "dd/MM HH'h'"
-        : "HH:mm";
-
-    private string RotuloFatia
-    {
-        get
-        {
-            var b = Stats.BucketSize;
-            if (b <= TimeSpan.Zero) return "—";
-            if (b >= TimeSpan.FromDays(1)) return $"por {b.TotalDays:0.#} dia(s)";
-            if (b >= TimeSpan.FromHours(1)) return $"por {b.TotalHours:0.#} hora(s)";
-            if (b >= TimeSpan.FromMinutes(1)) return $"por {b.TotalMinutes:0.#} minuto(s)";
-            return $"por {Math.Max(1, b.TotalSeconds):0.#} segundo(s)";
-        }
-    }
-}

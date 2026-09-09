@@ -185,7 +185,7 @@ namespace ClefExplorer.Helpers
         /// "Pedido 2 processado" são a mesma ocorrência com parâmetros diferentes, e contá-las
         /// separadamente esconderia justamente o que mais se repete.
         /// </summary>
-        private static (string, string)? MensagemAgrupavel(ClefEvent e)
+        public static (string, string)? MensagemAgrupavel(ClefEvent e)
         {
             var chave = !string.IsNullOrWhiteSpace(e.MessageTemplate) ? e.MessageTemplate : e.Message;
             return string.IsNullOrWhiteSpace(chave) ? null : (chave, chave);
@@ -200,7 +200,7 @@ namespace ClefExplorer.Helpers
         /// INTEIRO (array + uma string por linha) só para ficar com a primeira, e um log
         /// com muitas exceções pagava isso por evento a cada recálculo.
         /// </remarks>
-        private static (string, string)? TipoDaExcecao(ClefEvent e)
+        public static (string, string)? TipoDaExcecao(ClefEvent e)
         {
             if (string.IsNullOrWhiteSpace(e.Exception)) return null;
 
@@ -226,7 +226,7 @@ namespace ClefExplorer.Helpers
         /// Origem do evento: o <c>SourceContext</c> (a classe que logou) quando existe;
         /// senão o arquivo. É o que responde "de onde vem esse barulho todo".
         /// </summary>
-        private static (string, string)? OrigemDoEvento(ClefEvent e)
+        public static (string, string)? OrigemDoEvento(ClefEvent e)
         {
             if (e.Properties is not null
                 && e.Properties.TryGetValue("SourceContext", out var ctx)
